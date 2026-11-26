@@ -1,0 +1,29 @@
+# 复制到 ~/.config/bedrock-chat/config.toml 后按需修改。
+# 不要在这里填写 AWS 密钥、SSO Token 或密码。
+[aws]
+# region = "us-east-1"
+# profile = "work-sso"
+# model_id = "nova-lite" # 也可填实际模型 ID 或推理配置文件 ID/ARN
+
+[chat]
+max_input_tokens = 6000   # 本地估算预算，非 Bedrock 精确 Token 限制
+max_output_tokens = 1024 # 请求的 inferenceConfig.maxTokens
+system_prompt = ""       # 留空时不发送 system 字段
+
+[history]
+enabled = true
+save_images = false      # false: 只保存附件名、尺寸、格式、字节数，不保存像素
+
+[images]
+max_edge = 1568
+max_bytes = 1500000
+
+# 示例：按账户和 Region 确认可用的模型 ID、权限和支持的特性。
+[models.nova-lite]
+id = "amazon.nova-lite-v1:0"
+vision = true
+# 可选：USD / 百万 Token；两项同时设置，使用你账户对应的定价。
+# input_per_million = 0.0
+# output_per_million = 0.0
+
+# 文本模型请配置 vision = false，以便在本地拦截图片请求。
