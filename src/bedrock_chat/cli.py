@@ -52,7 +52,7 @@ COMMAND_NAMES = list(dict.fromkeys(command.split()[0] for command in COMMANDS))
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="bedrock-chat", description="WSL2 上的 AWS Bedrock 终端聊天"
+        prog="termtuck", description="支持图片、本地历史和 Token 预算的 AWS Bedrock 终端聊天"
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {version('bedrock-chat')}"
@@ -498,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             raise ConfigError("请在交互式 WSL2 终端运行；可用 --help 查看选项。")
         chat = Chat(settings, console)
-        chat.say("bedrock-chat · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行")
+        chat.say("TermTuck · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行")
         if not chat.session.model_id:
             chat.say("未配置模型；用 /model <ID> 设置，或通过 /resume 恢复已有会话。")
         prompt = create_prompt(chat)

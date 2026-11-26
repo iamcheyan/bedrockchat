@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "bedrock-chat"
 version = "0.1.0"
-description = "Lightweight AWS Bedrock terminal chat for WSL2"
+description = "TermTuck: token-efficient terminal AI chat with images and local history"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,6 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
+termtuck = "bedrock_chat.cli:main"
 bedrock-chat = "bedrock_chat.cli:main"
 
 [dependency-groups]

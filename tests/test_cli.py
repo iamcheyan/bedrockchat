@@ -1,3 +1,4 @@
+from importlib.metadata import distribution
 from io import BytesIO, StringIO
 from types import SimpleNamespace
 
@@ -9,6 +10,15 @@ from rich.console import Console
 from bedrock_chat.bedrock import Usage
 from bedrock_chat.cli import Chat, create_prompt, main, parse_args
 from bedrock_chat.config import load_settings
+
+
+def test_termtuck_and_legacy_commands_share_entry_point():
+    scripts = {
+        entry.name: entry.value
+        for entry in distribution("bedrock-chat").entry_points
+        if entry.group == "console_scripts"
+    }
+    assert scripts["termtuck"] == scripts["bedrock-chat"] == "bedrock_chat.cli:main"
 
 
 class FakeBedrock:

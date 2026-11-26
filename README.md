@@ -1,15 +1,21 @@
-# bedrock-chat
+# TermTuck
 
-面向 Windows Terminal + WSL2 的 AWS Bedrock 终端聊天工具。使用 boto3 的 `ConverseStream` 流式输出；支持 Markdown、代码高亮、中日英多行对话，以及文字与多张截图混合发送。不使用 Agent、工具调用、后台模型请求或额外的 AI 服务。
+**能发图、能接着聊，又不必把整段历史重发给模型的终端 AI 聊天工具。**
+
+TermTuck（Terminal + Tuck）面向 Windows Terminal + WSL2，使用 AWS Bedrock 流式回复，支持 Markdown、代码高亮和中日英多行对话。
+
+- **图片附件**：粘贴 Windows 截图或附加本地图片，支持图文混发；只在主动发送时上传到 Bedrock。
+- **本地会话记忆**：会话可以搜索、恢复和导出。保存的本地历史与实际发给模型的上下文相互独立。
+- **按预算裁剪上下文**：优先剔除最早的完整轮次，缩放新图片，默认不重发历史图片，不为摘要额外调用模型。支持设置输出上限，并显示实际 Token 和可选费用估算。
 
 ## 安装
 
 在 Windows PowerShell 中运行 `wsl -l -v`，确认发行版的 `VERSION` 是 `2`。如尚未安装 WSL，可参考 [Microsoft 的 WSL 安装指南](https://learn.microsoft.com/zh-cn/windows/wsl/install)。用 **Windows Terminal 的 WSL 配置文件**进入发行版；以下命令均在 WSL 内执行。需要 Python 3.11 或更新版本、Git，以及 pipx 或 uv（任选其一）。
 
+在本仓库页面选择 **Code → HTTPS**，用 `git clone` 克隆。公开仓库不需要 GitHub 登录。克隆后运行：
+
 ```bash
-# 私有仓库：需要有访问权限，并已在 WSL 登录 GitHub CLI。
-gh repo clone OWNER/bedrock-chat  # 将 OWNER 替换为 GitHub 仓库所有者
-cd bedrock-chat
+cd termtuck
 
 pipx install .
 pipx ensurepath   # 若命令未加入 PATH，运行后重新打开终端
@@ -17,10 +23,10 @@ pipx ensurepath   # 若命令未加入 PATH，运行后重新打开终端
 # uv tool install .
 # uv tool update-shell
 
-bedrock-chat --help
+termtuck --help
 ```
 
-也可以在 GitHub 仓库页面的 **Code → SSH** 复制克隆命令。工具没有发布到 PyPI，请从仓库或其构建的 wheel 安装。
+工具没有发布到 PyPI，请从仓库或其构建的 wheel 安装。旧命令 `bedrock-chat` 继续可用，配置与历史文件无需迁移。
 
 ## AWS CLI 认证与模型
 
@@ -31,7 +37,7 @@ aws configure sso --profile work-sso
 aws sso login --profile work-sso
 aws sts get-caller-identity --profile work-sso
 
-bedrock-chat --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0
+termtuck --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0
 ```
 
 以上 Region 和模型仅是示例，实际应使用账户已获授权、支持 ConverseStream 的模型；有的模型需要推理配置文件 ID/ARN，而不是底层模型 ID。IAM 至少需要对实际调用资源授予 `bedrock:InvokeModelWithResponseStream`，跨区推理还需要符合组织策略。对已配置的普通 AWS Profile，直接传 `--profile`；省略则使用 boto3 默认凭证链（包括 `AWS_PROFILE` 和已配置的默认 Profile）。SSO 过期时，重新执行 `aws sso login --profile work-sso` 后再发送，不需要输入额外 API Key。
@@ -45,7 +51,7 @@ install -d -m 700 "$config_dir"
 install -m 600 config.example.toml "$config_dir/config.toml"
 ```
 
-编辑文件中的 `[aws]`（`profile`、`region`、`model_id`），然后运行 `bedrock-chat`。`[models.<别名>]` 可配置 `id`、`vision`，以及每百万 Token 的 USD 输入、输出价格。`vision = false` 会在本地明确阻止图片；未标注则以 Bedrock 的实际响应为准，不额外请求模型能力信息。运行 `/model` 查看列表，用 `/model <别名或 ID>` 切换；未配置模型也可先用 `/resume` 恢复已有会话。
+编辑文件中的 `[aws]`（`profile`、`region`、`model_id`），然后运行 `termtuck`。`[models.<别名>]` 可配置 `id`、`vision`，以及每百万 Token 的 USD 输入、输出价格。`vision = false` 会在本地明确阻止图片；未标注则以 Bedrock 的实际响应为准，不额外请求模型能力信息。运行 `/model` 查看列表，用 `/model <别名或 ID>` 切换；未配置模型也可先用 `/resume` 恢复已有会话。
 
 ## 输入与截图
 
@@ -62,7 +68,7 @@ install -m 600 config.example.toml "$config_dir/config.toml"
 2. 回到 WSL 聊天输入框按 **Ctrl+G**。无需清空已输入文字，底部栏会显示图片数量、每张的尺寸和大小。截另一张再按一次，可发送多张图片。
 3. 输入说明后按 **Enter** 一起发送。也可只发送图片。发错附件前用 `/image drop 1` 移除第一张，或用 `/image drop all` 清空。
 
-Windows Terminal 的普通粘贴（例如 **Ctrl+Shift+V**）继续用于文字；它通常不会把图片像素传给 WSL。**Ctrl+G** 专门触发图片读取；若被自定义 Windows Terminal 快捷键拦截，可免联网运行 `bedrock-chat --check-clipboard` 排查，也可在聊天内输入 `/image paste`。程序通过 WSL interop 启动 Windows PowerShell 读取图片格式，不轮询剪贴板、不读剪贴板文本、不写临时截图文件。
+Windows Terminal 的普通粘贴（例如 **Ctrl+Shift+V**）继续用于文字；它通常不会把图片像素传给 WSL。**Ctrl+G** 专门触发图片读取；若被自定义 Windows Terminal 快捷键拦截，可免联网运行 `termtuck --check-clipboard` 排查，也可在聊天内输入 `/image paste`。程序通过 WSL interop 启动 Windows PowerShell 读取图片格式，不轮询剪贴板、不读剪贴板文本、不写临时截图文件。
 
 手动附加：`/image "./sample shot.png"`。默认缩放图片长边至不超过 1568 px，优先用无损 PNG 保护细字；可在 `[images]` 调整尺寸和字节上限。特别小的文字建议先裁剪图中相关区域，避免整屏缩放。每条消息最多 20 张，合计图片字节最多 15 MB，个别模型可能有更严格的限制。
 
@@ -108,7 +114,7 @@ uv build
 
 ### 本地 AWS CLI 认证模拟
 
-可选用系统已有的 AWS CLI v2；它不是运行时新增依赖。以下命令让真正的 `aws configure set` 在临时 HOME 下写入合成 Profile，再由 `bedrock-chat` 读取。未指定 `BEDROCK_TEST_AWS_CLI` 时，仅跳过这项需要真实 AWS CLI 的测试。
+可选用系统已有的 AWS CLI v2；它不是运行时新增依赖。以下命令让真正的 `aws configure set` 在临时 HOME 下写入合成 Profile，再由 TermTuck 读取。未指定 `BEDROCK_TEST_AWS_CLI` 时，仅跳过这项需要真实 AWS CLI 的测试。
 
 ```bash
 BEDROCK_TEST_AWS_CLI="$(command -v aws)" uv run --locked pytest -q tests/test_aws_cli_lab.py
@@ -120,7 +126,7 @@ BEDROCK_TEST_AWS_CLI="$(command -v aws)" uv run --locked pytest -q tests/test_aw
 
 未在开发机上向真实 AWS 登录或调用 Bedrock，也未在真实 Windows Terminal + WSL2 上跑截图链路（开发机是 Debian，无 Windows 会话和 AWS 登录）。真机验收步骤：
 
-1. 截取一张**不含敏感数据**的窗口图片，在 WSL 运行 `bedrock-chat --check-clipboard`，预期显示正确尺寸和非零大小，不产生模型调用。
-2. 运行 `bedrock-chat`；输入半句文字，按 `Ctrl+G` 并确认草稿还在。再粘贴一张、移除其中一张，并确认底部数字随操作变化；另外检查普通文字粘贴和 `Esc` 后 `Enter` 换行。
+1. 截取一张**不含敏感数据**的窗口图片，在 WSL 运行 `termtuck --check-clipboard`，预期显示正确尺寸和非零大小，不产生模型调用。
+2. 运行 `termtuck`；输入半句文字，按 `Ctrl+G` 并确认草稿还在。再粘贴一张、移除其中一张，并确认底部数字随操作变化；另外检查普通文字粘贴和 `Esc` 后 `Enter` 换行。
 3. 用允许视觉输入的已授权模型发送图片和测试文字，确认收到流式回复和实际 Token；再追问一句验证多轮。发送一条较长的测试请求并按 `Ctrl+C`，确认能继续输入，且未知用量不显示为零。
 4. 切换到配置为 `vision = false` 的模型，确认附加图片被拒绝；待测试 Profile 的 SSO 会话自然过期后，确认提示重新登录。
