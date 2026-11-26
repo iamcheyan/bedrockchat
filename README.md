@@ -36,7 +36,7 @@ bedrock-chat --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0
 
 以上 Region 和模型仅是示例，实际应使用账户已获授权、支持 ConverseStream 的模型；有的模型需要推理配置文件 ID/ARN，而不是底层模型 ID。IAM 至少需要对实际调用资源授予 `bedrock:InvokeModelWithResponseStream`，跨区推理还需要符合组织策略。对已配置的普通 AWS Profile，直接传 `--profile`；省略则使用 boto3 默认凭证链（包括 `AWS_PROFILE` 和已配置的默认 Profile）。SSO 过期时，重新执行 `aws sso login --profile work-sso` 后再发送，不需要输入额外 API Key。
 
-可将常用参数写进 TOML；CLI 参数优先。默认配置路径是 `$XDG_CONFIG_HOME/bedrock-chat/config.toml`，未设置 XDG 时是 `~/.config/bedrock-chat/config.toml`。也可用 `--config` 指定文件。程序不在当前工作目录寻找配置。
+可将常用参数写进 TOML；CLI 参数优先。Region 按 `--region` → TOML `[aws].region` → `AWS_REGION` → `AWS_DEFAULT_REGION` → AWS Profile 中的 `region` 解析。默认配置路径是 `$XDG_CONFIG_HOME/bedrock-chat/config.toml`，未设置 XDG 时是 `~/.config/bedrock-chat/config.toml`。也可用 `--config` 指定文件。程序不在当前工作目录寻找配置。
 
 ```bash
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/bedrock-chat"
@@ -104,7 +104,21 @@ uv run ruff format --check .
 uv build
 ```
 
-单元及功能测试使用 Mock Bedrock 事件流、Mock PowerShell 进程和合成图片，并包含 prompt_toolkit 按键测试。未在开发机上向真实 Bedrock 发起请求，也未在真实 Windows Terminal + WSL2 上跑截图链路（开发机是 Debian，无 Windows 会话和 AWS 登录）。真机验收步骤：
+单元及功能测试包含 Bedrock 事件流、Mock PowerShell 进程、合成图片和 prompt_toolkit 按键测试。
+
+### 本地 AWS CLI 认证模拟
+
+可选用系统已有的 AWS CLI v2；它不是运行时新增依赖。以下命令让真正的 `aws configure set` 在临时 HOME 下写入合成 Profile，再由 `bedrock-chat` 读取。未指定 `BEDROCK_TEST_AWS_CLI` 时，仅跳过这项需要真实 AWS CLI 的测试。
+
+```bash
+BEDROCK_TEST_AWS_CLI="$(command -v aws)" uv run --locked pytest -q tests/test_aws_cli_lab.py
+```
+
+测试验证显式 Profile 和 `AWS_PROFILE` 读取共享凭证、随请求发送会话凭证的 SigV4 签名路径，以及 IAM Identity Center 本地缓存有效、过期和缺失时的行为。boto3/botocore 的凭证解析、签名和二进制 EventStream 解码实际执行；SSO 角色凭证和 Bedrock 响应仅在测试内模拟。不会访问真实 AWS API、修改现有 `~/.aws`，或消耗模型 Token。参考 AWS 官方文档：[配置与凭证文件](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html)、[IAM Identity Center](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html)、[Region 环境变量](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html#envvars-list-AWS_REGION)及 [boto3 凭证链](https://docs.aws.amazon.com/boto3/latest/guide/credentials.html)。
+
+### 真机验收
+
+未在开发机上向真实 AWS 登录或调用 Bedrock，也未在真实 Windows Terminal + WSL2 上跑截图链路（开发机是 Debian，无 Windows 会话和 AWS 登录）。真机验收步骤：
 
 1. 截取一张**不含敏感数据**的窗口图片，在 WSL 运行 `bedrock-chat --check-clipboard`，预期显示正确尺寸和非零大小，不产生模型调用。
 2. 运行 `bedrock-chat`；输入半句文字，按 `Ctrl+G` 并确认草稿还在。再粘贴一张、移除其中一张，并确认底部数字随操作变化；另外检查普通文字粘贴和 `Esc` 后 `Enter` 换行。

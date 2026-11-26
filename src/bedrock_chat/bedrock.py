@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from os import getenv
 from unicodedata import east_asian_width
 
 import boto3
@@ -226,7 +227,7 @@ def _safe_error(exc: Exception, has_images: bool) -> str:
     if isinstance(exc, aws.ProfileNotFound):
         return "找不到 AWS 配置文件，请检查 profile 名称。"
     if isinstance(exc, aws.NoRegionError):
-        return "未指定 AWS 区域，请设置 region 或 AWS_DEFAULT_REGION。"
+        return "未指定 AWS 区域，请设置 --region、AWS_REGION 或 AWS_DEFAULT_REGION。"
     if isinstance(exc, (aws.SSOError, aws.TokenRetrievalError, aws.CredentialRetrievalError)):
         return _REAUTH
     if isinstance(exc, (aws.NoCredentialsError, aws.PartialCredentialsError)):
@@ -263,8 +264,11 @@ class Bedrock:
         # AWS account-level model invocation logging is configured separately.
         core_session.set_config_variable("csm_enabled", False)
         core_session.set_config_variable("ignore_configured_endpoint_urls", True)
+        # AWS CLI v2 prefers AWS_REGION over AWS_DEFAULT_REGION; boto3 alone
+        # only resolves AWS_DEFAULT_REGION from the environment.
+        region = self._region or getenv("AWS_REGION") or None
         session = boto3.Session(
-            botocore_session=core_session, region_name=self._region, profile_name=self._profile
+            botocore_session=core_session, region_name=region, profile_name=self._profile
         )
         # Use SDK endpoint resolution and default TLS verification.
         return session.client(
