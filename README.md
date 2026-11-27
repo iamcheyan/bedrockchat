@@ -67,13 +67,24 @@ install -m 600 config.example.toml "$config_dir/config.toml"
 
 ## 使用本机 Ollama 或其他兼容端点
 
-默认仍使用 Bedrock。Ollama 已在本机运行、且模型已下载时，不需要 AWS 凭证或 API Key：
+默认仍使用 Bedrock。要试用本地 Ollama，先确认 Ollama 已运行，并用 `ollama list` 检查是否已下载 `qwen2.5:1.5b`；没有的话，在 Ollama 所在环境运行 `ollama pull qwen2.5:1.5b`。然后在运行 TermTuck 的终端执行（无需 AWS 凭证或 API Key）：
 
 ```bash
 termtuck --provider openai --model qwen2.5:1.5b
 ```
 
-默认请求 `http://localhost:11434/v1/chat/completions`。如果地址不同，用 `--endpoint` 指定完整的 `/chat/completions` URL，或在 `config.toml` 中设置：
+默认请求 `http://localhost:11434/v1/chat/completions`。若要排除 TermTuck 的影响，可在同一个终端用以下最小请求验证端点和模型（会发起一次模型推理）：
+
+```bash
+curl --noproxy localhost -fsS --max-time 60 \
+  http://localhost:11434/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen2.5:1.5b","messages":[{"role":"user","content":"Who are you?"}],"stream":false}'
+```
+
+如果连接被拒绝，检查 Ollama 是否运行，以及运行 TermTuck 的环境（例如 WSL）能否通过 `localhost` 访问它。若模型不存在，核对 `ollama list` 中的完整名称和标签。启动后可用 `/config` 确认 TermTuck 实际选择的后端和端点。
+
+如果地址不同，用 `--endpoint` 指定完整的 `/chat/completions` URL，或在 `config.toml` 中设置：
 
 ```toml
 [chat]
@@ -85,7 +96,7 @@ model_id = "qwen2.5:1.5b"
 stream = true
 ```
 
-只支持非流式 JSON 的服务可设置 `stream = false`。`qwen2.5:1.5b` 是文本模型；发送图片时请换用服务支持的视觉模型。兼容后端目前适用于不要求 API Key 的服务；仅回环地址可用 HTTP，其他地址须用 HTTPS。请求不会自动重试、跟随重定向或切换后端。聊天记录和上次使用的模型按后端及兼容端点隔离，避免历史被误发到新地址。用 `--provider bedrock` 可切回 AWS。
+如果上述 `curl` 请求成功，但服务不支持流式响应或未正确结束流，可将 `[openai]` 的 `stream` 改为 `false`，重启 TermTuck 后使用非流式 JSON。`qwen2.5:1.5b` 是文本模型；发送图片时请换用服务支持的视觉模型。兼容后端目前适用于不要求 API Key 的服务；仅回环地址可用 HTTP，其他地址须用 HTTPS。请求不会自动重试、跟随重定向或切换后端。聊天记录和上次使用的模型按后端及兼容端点隔离，避免历史被误发到新地址。用 `--provider bedrock` 可切回 AWS。
 
 参考：[Ollama 的 OpenAI 兼容接口](https://docs.ollama.com/api/openai-compatibility)。
 

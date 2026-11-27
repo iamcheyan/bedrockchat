@@ -39,7 +39,24 @@ termtuck --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0 --l
 
 ## ローカルの Ollama・互換エンドポイントを使う
 
-Ollama が起動し、モデルをダウンロード済みなら、`termtuck --provider openai --model qwen2.5:1.5b` で利用できます。既定の送信先は `http://localhost:11434/v1/chat/completions` です。変更するには `--endpoint <完全なURL>` を指定するか、[設定例](config.example.toml)の `[chat]` で `provider = "openai"` を指定し、`[openai]` を設定します。非ストリーミングの JSON のみを返すサーバーでは `[openai]` の `stream = false` を指定してください。
+Ollama を起動し、`ollama list` で `qwen2.5:1.5b` があるか確認します。なければ Ollama を動かしている環境で `ollama pull qwen2.5:1.5b` を実行してください。その後、TermTuck を使うターミナルで実行します。
+
+```bash
+termtuck --provider openai --model qwen2.5:1.5b
+```
+
+既定の送信先は `http://localhost:11434/v1/chat/completions` です。TermTuck を介さず接続先とモデルを確認するには、同じターミナルで以下を実行します。推論リクエストを 1 回送信します。
+
+```bash
+curl --noproxy localhost -fsS --max-time 60 \
+  http://localhost:11434/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen2.5:1.5b","messages":[{"role":"user","content":"Who are you?"}],"stream":false}'
+```
+
+接続が拒否される場合は、Ollama が起動しているか、WSL など TermTuck を実行する環境から `localhost` で接続できるかを確認してください。モデルが見つからない場合は、`ollama list` で名前とタグを確認します。TermTuck 内の `/config` で、使用中のバックエンドと接続先を確認できます。
+
+接続先を変更するには `--endpoint <完全なURL>` を指定するか、[設定例](config.example.toml)の `[chat]` で `provider = "openai"` を指定し、`[openai]` を設定します。`curl` では応答するもののストリーミングが未対応、または正常に終了しない場合は、`[openai]` の `stream = false` を指定して TermTuck を起動し直してください。
 
 現在は API キーが不要なサービスに対応しています。HTTP はループバックアドレスに限り、その他の送信先には HTTPS が必要です。`qwen2.5:1.5b` はテキスト専用です。画像送信には画像対応モデルを選んでください。会話履歴と前回のモデルは、バックエンド・互換エンドポイントごとに分けて保存します。既定のバックエンドは Bedrock です。
 

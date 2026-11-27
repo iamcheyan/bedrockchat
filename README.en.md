@@ -39,7 +39,24 @@ To keep settings, copy [config.example.toml](config.example.toml) to `$XDG_CONFI
 
 ## Use local Ollama or another compatible endpoint
 
-With Ollama already running and the model downloaded, run `termtuck --provider openai --model qwen2.5:1.5b`. The default endpoint is `http://localhost:11434/v1/chat/completions`. Use `--endpoint <full-url>` for a different service, or set `[chat].provider = "openai"` and configure `[openai]` as shown in [the sample configuration](config.example.toml). Set `stream = false` under `[openai]` for JSON-only endpoints.
+Start Ollama and check `ollama list` for `qwen2.5:1.5b`. If it is missing, run `ollama pull qwen2.5:1.5b` where Ollama runs. Then, in the terminal where you use TermTuck:
+
+```bash
+termtuck --provider openai --model qwen2.5:1.5b
+```
+
+The default endpoint is `http://localhost:11434/v1/chat/completions`. To test the endpoint and model independently of TermTuck, run this in the same terminal. It sends one inference request:
+
+```bash
+curl --noproxy localhost -fsS --max-time 60 \
+  http://localhost:11434/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen2.5:1.5b","messages":[{"role":"user","content":"Who are you?"}],"stream":false}'
+```
+
+If the connection is refused, check that Ollama is running and that `localhost` reaches it from your terminal (including from WSL). If the model is not found, check the full name and tag in `ollama list`. Use `/config` in TermTuck to confirm the active backend and endpoint.
+
+Use `--endpoint <full-url>` for a different service, or set `provider = "openai"` under `[chat]` and configure `[openai]` as shown in [the sample configuration](config.example.toml). If the curl request works but streaming is unsupported or ends incorrectly, set `stream = false` under `[openai]` and restart TermTuck.
 
 This backend currently supports services that do not require an API key. HTTP is restricted to loopback addresses; other endpoints require HTTPS. Use an image-capable model to send images (`qwen2.5:1.5b` is text-only). History and the last model are isolated by backend and endpoint. Bedrock remains the default.
 
