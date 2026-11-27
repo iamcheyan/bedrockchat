@@ -7,7 +7,7 @@ from functools import cache
 
 DEFAULT_LANGUAGE = "zh"
 LANGUAGES = {"zh": "简体中文", "en": "English", "ja": "日本語"}
-_language = ContextVar("termtuck_language", default=DEFAULT_LANGUAGE)
+_language = ContextVar("bedrockchat_language", default=DEFAULT_LANGUAGE)
 
 
 @contextmanager

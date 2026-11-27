@@ -67,7 +67,7 @@ COMMAND_NAMES = list(dict.fromkeys(command.split()[0] for command in COMMANDS))
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="termtuck",
+        prog="bedrockchat",
         description=tr("支持图片、本地历史和 Token 预算的终端聊天"),
         add_help=False,
         allow_abbrev=False,
@@ -78,7 +78,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"%(prog)s {version('bedrock-chat')}",
+        version=f"%(prog)s {version('bedrockchat')}",
         help=tr("显示版本并退出"),
     )
     parser.add_argument("--config", type=Path, help=tr("显式读取指定的 TOML 文件"))
@@ -220,7 +220,7 @@ class Chat:
         if sum(len(item.data) for item in self.images) + len(image.data) > MAX_IMAGE_BODY:
             raise ImageError(tr("图片合计超过 15 MB，请移除部分图片或减少其尺寸。"))
         if self._next_marker > MARK_END:
-            raise ImageError(tr("本次运行的图片标记已用完，请重启 TermTuck。"))
+            raise ImageError(tr("本次运行的图片标记已用完，请重启 bedrockchat。"))
         marker = chr(self._next_marker)
         self._next_marker += 1
         self.attachments[marker] = image
@@ -745,7 +745,7 @@ def _run(args: argparse.Namespace, raw: dict) -> int:
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             raise ConfigError(tr("请在交互式 WSL2 终端运行；可用 --help 查看选项。"))
         chat = Chat(settings, console)
-        chat.say(tr("TermTuck · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行"))
+        chat.say(tr("bedrockchat · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行"))
         chat.say(tr("后端：{provider}", provider=chat.provider_name), style="dim")
         if chat.session.model_id:
             chat.say(tr("当前模型：{model}", model=chat.session.model_id), style="dim")

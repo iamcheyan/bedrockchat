@@ -2,9 +2,9 @@
 
 MESSAGES = {
     "[图片 #{number}]": ("[Image #{number}]", "[画像 #{number}]"),
-    "本次运行的图片标记已用完，请重启 TermTuck。": (
-        "No more attachment markers are available. Restart TermTuck.",
-        "画像のマーカーを使い切りました。TermTuck を再起動してください。",
+    "本次运行的图片标记已用完，请重启 bedrockchat。": (
+        "No more attachment markers are available. Restart bedrockchat.",
+        "画像のマーカーを使い切りました。bedrockchat を再起動してください。",
     ),
     "/new [名称]": ("/new [name]", "/new [名前]"),
     "/history [关键词]": ("/history [keyword]", "/history [キーワード]"),
@@ -302,9 +302,9 @@ MESSAGES = {
         "Run in an interactive WSL2 terminal. Use --help to see options.",
         "対話型の WSL2 ターミナルで実行してください。オプションは --help で確認できます。",
     ),
-    "TermTuck · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行": (
-        "TermTuck · /help for commands · Ctrl+G paste image · Esc+Enter newline",
-        "TermTuck · /help コマンド一覧 · Ctrl+G 画像を貼り付け · Esc+Enter 改行",
+    "bedrockchat · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行": (
+        "bedrockchat · /help for commands · Ctrl+G paste image · Esc+Enter newline",
+        "bedrockchat · /help コマンド一覧 · Ctrl+G 画像を貼り付け · Esc+Enter 改行",
     ),
     "未配置模型；用 /model <ID> 设置，或通过 /resume 恢复已有会话。": (
         "No model configured. Use /model <ID> or /resume an existing session.",

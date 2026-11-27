@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bedrock-chat"
+name = "bedrockchat"
 version = "0.1.0"
-description = "TermTuck: token-efficient terminal AI chat with images and local history"
+description = "bedrockchat: token-efficient terminal AI chat with images and local history"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,8 +16,12 @@ dependencies = [
 ]
 
 [project.scripts]
+bedrockchat = "bedrock_chat.cli:main"
 termtuck = "bedrock_chat.cli:main"
 bedrock-chat = "bedrock_chat.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bedrock_chat"]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1"]

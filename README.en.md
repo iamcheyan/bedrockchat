@@ -1,51 +1,51 @@
-# TermTuck
+# bedrockchat
 
 [简体中文](README.md) · English · [日本語](README.ja.md)
 
-TermTuck is a terminal chat app for AWS Bedrock and OpenAI-compatible endpoints. It streams replies with Markdown and code highlighting, accepts image attachments, and keeps local chat history separate from the text sent back to the model. When the estimated input exceeds the configured budget, it drops the oldest complete turns first. It never automatically resends historical images.
+bedrockchat is a terminal chat app for AWS Bedrock and OpenAI-compatible endpoints. It streams replies with Markdown and code highlighting, accepts image attachments, and keeps local chat history separate from the text sent back to the model. When the estimated input exceeds the configured budget, it drops the oldest complete turns first. It never automatically resends historical images.
 
 ## Install
 
-TermTuck is designed for **Windows Terminal + WSL2**. In Windows PowerShell, run `wsl -l -v` and check that your distribution shows version `2`. See [Microsoft’s WSL installation guide](https://learn.microsoft.com/en-us/windows/wsl/install) if needed. Open the distribution in Windows Terminal and run the commands below **inside WSL**. From a native or remote Linux terminal, attach images by file path; the Windows screenshot shortcut needs a local Windows clipboard and WSL interop.
+bedrockchat is designed for **Windows Terminal + WSL2**. In Windows PowerShell, run `wsl -l -v` and check that your distribution shows version `2`. See [Microsoft’s WSL installation guide](https://learn.microsoft.com/en-us/windows/wsl/install) if needed. Open the distribution in Windows Terminal and run the commands below **inside WSL**. From a native or remote Linux terminal, attach images by file path; the Windows screenshot shortcut needs a local Windows clipboard and WSL interop.
 
 Install Python 3.11 or later, Git, and either pipx or uv. On the repository page, copy the URL under **Code → HTTPS**, clone it with `git clone`, then run from the cloned directory:
 
 ```bash
 pipx install .
-pipx ensurepath   # Reopen the terminal if termtuck was not on PATH.
+pipx ensurepath   # Reopen the terminal if bedrockchat was not on PATH.
 # Or: uv tool install .
 # If needed: uv tool update-shell
 
-termtuck --help
+bedrockchat --help
 ```
 
-TermTuck is not on PyPI; install from the checkout or a wheel built from it. The `bedrock-chat` command still works.
+bedrockchat is not on PyPI; install from the checkout or a wheel built from it. The `bedrock-chat` command still works.
 
 ## Connect to AWS Bedrock
 
-Install [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) in the environment where you run TermTuck. A Windows AWS CLI login is not automatically available in WSL. If your organization uses IAM Identity Center, configure and verify an example profile:
+Install [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) in the environment where you run bedrockchat. A Windows AWS CLI login is not automatically available in WSL. If your organization uses IAM Identity Center, configure and verify an example profile:
 
 ```bash
 aws configure sso --profile work-sso
 aws sso login --profile work-sso
 aws sts get-caller-identity --profile work-sso
 
-termtuck --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0 --lang en
+bedrockchat --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0 --lang en
 ```
 
-Replace the example profile, Region, and model with ones your account can use. The model must support Bedrock `ConverseStream`, and IAM must allow `bedrock:InvokeModelWithResponseStream` on the resources actually invoked. Some models require an inference profile ID or ARN rather than a base model ID. If SSO expires, run `aws sso login --profile work-sso` again before sending. With an existing AWS profile, pass `--profile`; if no profile is set, TermTuck uses the boto3 default credential chain, including `AWS_PROFILE`.
+Replace the example profile, Region, and model with ones your account can use. The model must support Bedrock `ConverseStream`, and IAM must allow `bedrock:InvokeModelWithResponseStream` on the resources actually invoked. Some models require an inference profile ID or ARN rather than a base model ID. If SSO expires, run `aws sso login --profile work-sso` again before sending. With an existing AWS profile, pass `--profile`; if no profile is set, bedrockchat uses the boto3 default credential chain, including `AWS_PROFILE`.
 
 To keep settings, copy [config.example.toml](config.example.toml) to `$XDG_CONFIG_HOME/bedrock-chat/config.toml` (default `~/.config/bedrock-chat/config.toml`) without overwriting an existing file, or pass `--config PATH`. Set `profile`, `region`, and `model_id` under `[aws]` as needed. Never put AWS secrets in this file.
 
 ## Use local Ollama or another compatible endpoint
 
-Start Ollama and check `ollama list` for `qwen2.5:1.5b`. If it is missing, run `ollama pull qwen2.5:1.5b` where Ollama runs. Then, in the terminal where you use TermTuck:
+Start Ollama and check `ollama list` for `qwen2.5:1.5b`. If it is missing, run `ollama pull qwen2.5:1.5b` where Ollama runs. Then, in the terminal where you use bedrockchat:
 
 ```bash
-termtuck --provider openai --model qwen2.5:1.5b
+bedrockchat --provider openai --model qwen2.5:1.5b
 ```
 
-The default endpoint is `http://localhost:11434/v1/chat/completions`. To test the endpoint and model independently of TermTuck, run this in the same terminal. It sends one inference request:
+The default endpoint is `http://localhost:11434/v1/chat/completions`. To test the endpoint and model independently of bedrockchat, run this in the same terminal. It sends one inference request:
 
 ```bash
 curl --noproxy localhost -fsS --max-time 60 \
@@ -54,17 +54,17 @@ curl --noproxy localhost -fsS --max-time 60 \
   -d '{"model":"qwen2.5:1.5b","messages":[{"role":"user","content":"Who are you?"}],"stream":false}'
 ```
 
-If the connection is refused, check that Ollama is running and that `localhost` reaches it from your terminal (including from WSL). If the model is not found, check the full name and tag in `ollama list`. Use `/config` in TermTuck to confirm the active backend and endpoint.
+If the connection is refused, check that Ollama is running and that `localhost` reaches it from your terminal (including from WSL). If the model is not found, check the full name and tag in `ollama list`. Use `/config` in bedrockchat to confirm the active backend and endpoint.
 
-Use `--endpoint <full-url>` for a different service, or set `provider = "openai"` under `[chat]` and configure `[openai]` as shown in [the sample configuration](config.example.toml). If the curl request works but streaming is unsupported or ends incorrectly, set `stream = false` under `[openai]` and restart TermTuck.
+Use `--endpoint <full-url>` for a different service, or set `provider = "openai"` under `[chat]` and configure `[openai]` as shown in [the sample configuration](config.example.toml). If the curl request works but streaming is unsupported or ends incorrectly, set `stream = false` under `[openai]` and restart bedrockchat.
 
 This backend currently supports services that do not require an API key. HTTP is restricted to loopback addresses; other endpoints require HTTPS. Use an image-capable model to send images (`qwen2.5:1.5b` is text-only). History and the last model are isolated by backend and endpoint. Bedrock remains the default.
 
 ## Choose the interface language
 
-From your shell, start TermTuck with `termtuck --lang zh` (Simplified Chinese), `termtuck --lang en` (English), or `termtuck --lang ja` (Japanese).
+From your shell, start bedrockchat with `bedrockchat --lang zh` (Simplified Chinese), `bedrockchat --lang en` (English), or `bedrockchat --lang ja` (Japanese).
 
-`/lang` is a **chat command**, not a shell command: do not run `termtuck /lang`. Inside chat, `/lang` lists the current language and available choices. `/lang zh`, `/lang en`, and `/lang ja` switch the UI immediately and save the choice locally. Reopen TermTuck without `--lang` to use the saved language.
+`/lang` is a **chat command**, not a shell command: do not run `bedrockchat /lang`. Inside chat, `/lang` lists the current language and available choices. `/lang zh`, `/lang en`, and `/lang ja` switch the UI immediately and save the choice locally. Reopen bedrockchat without `--lang` to use the saved language.
 
 Startup order: `--lang` → last saved interactive selection → `language` under `[ui]` in config → Simplified Chinese. For example:
 
@@ -89,4 +89,4 @@ Attachments are sent only when you send a message. The message, attached images,
 
 Automated tests use synthetic images, mocked PowerShell and Bedrock responses, and simulated terminal key input. The optional local AWS CLI v2 test exercises profile and credential handling without calling AWS services. These checks do not validate a real Windows screenshot transfer or live AWS authentication and inference.
 
-To check your setup, run `termtuck --check-clipboard` in WSL with a nonsensitive Windows screenshot on the clipboard. It should report image dimensions and size without contacting Bedrock. Then attach the screenshot in chat and send it with a short test message to an authorized, image-capable model. Confirm that the reply streams and that token usage is reported. To check UI persistence separately, switch with `/lang ja`, exit, and restart without `--lang`; `/lang` should show `ja`. Then start with `--no-history`, switch to `en` in chat, and exit. On the next normal launch without `--lang`, `/lang` should still show `ja`.
+To check your setup, run `bedrockchat --check-clipboard` in WSL with a nonsensitive Windows screenshot on the clipboard. It should report image dimensions and size without contacting Bedrock. Then attach the screenshot in chat and send it with a short test message to an authorized, image-capable model. Confirm that the reply streams and that token usage is reported. To check UI persistence separately, switch with `/lang ja`, exit, and restart without `--lang`; `/lang` should show `ja`. Then start with `--no-history`, switch to `en` in chat, and exit. On the next normal launch without `--lang`, `/lang` should still show `ja`.

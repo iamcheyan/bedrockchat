@@ -1,10 +1,10 @@
-# TermTuck
+# bedrockchat
 
 简体中文 · [English](README.en.md) · [日本語](README.ja.md)
 
 **能发图、能接着聊，又不必把整段历史重发给模型的终端 AI 聊天工具。**
 
-TermTuck（Terminal + Tuck）面向 Windows Terminal + WSL2，支持 AWS Bedrock 和 OpenAI 兼容服务的流式回复，支持 Markdown、代码高亮和中日英多行对话。
+bedrockchat面向 Windows Terminal + WSL2，支持 AWS Bedrock 和 OpenAI 兼容服务的流式回复，支持 Markdown、代码高亮和中日英多行对话。
 
 - **图片附件**：粘贴 Windows 截图或附加本地图片，支持图文混发；只在主动发送时传给选定的后端。
 - **本地会话记忆**：会话可以搜索、恢复和导出。保存的本地历史与实际发给模型的上下文相互独立。
@@ -17,7 +17,7 @@ TermTuck（Terminal + Tuck）面向 Windows Terminal + WSL2，支持 AWS Bedrock
 在本仓库页面选择 **Code → HTTPS**，用 `git clone` 克隆。公开仓库不需要 GitHub 登录。克隆后运行：
 
 ```bash
-cd termtuck
+cd bedrockchat
 
 pipx install .
 pipx ensurepath   # 若命令未加入 PATH，运行后重新打开终端
@@ -25,20 +25,20 @@ pipx ensurepath   # 若命令未加入 PATH，运行后重新打开终端
 # uv tool install .
 # uv tool update-shell
 
-termtuck --help
+bedrockchat --help
 ```
 
 工具没有发布到 PyPI，请从仓库或其构建的 wheel 安装。旧命令 `bedrock-chat` 继续可用，配置与历史文件无需迁移。
 
 ## 界面语言
 
-启动时任选一种：`termtuck --lang zh`（简体中文）、`termtuck --lang en`（英语）或 `termtuck --lang ja`（日语）。
+启动时任选一种：`bedrockchat --lang zh`（简体中文）、`bedrockchat --lang en`（英语）或 `bedrockchat --lang ja`（日语）。
 
-`/lang` 是**聊天内命令**，不是 `termtuck /lang` 这样的 shell 命令。进入聊天后，输入 `/lang` 查看当前语言和可选语言；输入 `/lang zh`、`/lang en` 或 `/lang ja` 立即切换并在本地保存。重新打开 TermTuck 时，若未指定 `--lang`，则使用上次保存的界面语言。
+`/lang` 是**聊天内命令**，不是 `bedrockchat /lang` 这样的 shell 命令。进入聊天后，输入 `/lang` 查看当前语言和可选语言；输入 `/lang zh`、`/lang en` 或 `/lang ja` 立即切换并在本地保存。重新打开 bedrockchat 时，若未指定 `--lang`，则使用上次保存的界面语言。
 
 启动时的优先级：`--lang` → 上次在聊天内选定并保存的语言 → TOML 的 `[ui]` 下的 `language`（[示例](config.example.toml)为 `language = "zh"`）→ 简体中文。`--no-history` 不读取或写入上次选定的界面语言，但仍可用参数或配置指定语言，也可在聊天中切换（仅在当前进程内生效）。
 
-此设置只影响 TermTuck 的界面，不会改变发送给模型的提示词，也不控制模型回复的语言。
+此设置只影响 bedrockchat 的界面，不会改变发送给模型的提示词，也不控制模型回复的语言。
 
 ## AWS CLI 认证与模型
 
@@ -49,7 +49,7 @@ aws configure sso --profile work-sso
 aws sso login --profile work-sso
 aws sts get-caller-identity --profile work-sso
 
-termtuck --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0
+bedrockchat --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0
 ```
 
 以上 Region 和模型仅是示例，实际应使用账户已获授权、支持 ConverseStream 的模型；有的模型需要推理配置文件 ID/ARN，而不是底层模型 ID。IAM 至少需要对实际调用资源授予 `bedrock:InvokeModelWithResponseStream`，跨区推理还需要符合组织策略。对已配置的普通 AWS Profile，直接传 `--profile`；省略则使用 boto3 默认凭证链（包括 `AWS_PROFILE` 和已配置的默认 Profile）。SSO 过期时，重新执行 `aws sso login --profile work-sso` 后再发送，不需要输入额外 API Key。
@@ -63,17 +63,17 @@ install -d -m 700 "$config_dir"
 install -m 600 config.example.toml "$config_dir/config.toml"
 ```
 
-编辑文件中的 `[aws]`（`profile`、`region`、`model_id`），然后运行 `termtuck`。`[models.<别名>]` 可配置 `id`、`vision`，以及每百万 Token 的 USD 输入、输出价格。`vision = false` 会在本地明确阻止图片；未标注则以 Bedrock 的实际响应为准，不额外请求模型能力信息。运行 `/model` 查看列表，用 `/model <别名或 ID>` 切换。新启动时的模型优先级是 `--model` → 上次选用的模型 → `[aws].model_id`。通过 `/model` 切换后立即记住，成功完成对话也会更新记录；记录只包含模型 ID，保存在历史目录的 `last-model` 文件中。`/resume` 仍使用会话自己的模型。关闭历史时不读取或保存上次模型。
+编辑文件中的 `[aws]`（`profile`、`region`、`model_id`），然后运行 `bedrockchat`。`[models.<别名>]` 可配置 `id`、`vision`，以及每百万 Token 的 USD 输入、输出价格。`vision = false` 会在本地明确阻止图片；未标注则以 Bedrock 的实际响应为准，不额外请求模型能力信息。运行 `/model` 查看列表，用 `/model <别名或 ID>` 切换。新启动时的模型优先级是 `--model` → 上次选用的模型 → `[aws].model_id`。通过 `/model` 切换后立即记住，成功完成对话也会更新记录；记录只包含模型 ID，保存在历史目录的 `last-model` 文件中。`/resume` 仍使用会话自己的模型。关闭历史时不读取或保存上次模型。
 
 ## 使用本机 Ollama 或其他兼容端点
 
-默认仍使用 Bedrock。要试用本地 Ollama，先确认 Ollama 已运行，并用 `ollama list` 检查是否已下载 `qwen2.5:1.5b`；没有的话，在 Ollama 所在环境运行 `ollama pull qwen2.5:1.5b`。然后在运行 TermTuck 的终端执行（无需 AWS 凭证或 API Key）：
+默认仍使用 Bedrock。要试用本地 Ollama，先确认 Ollama 已运行，并用 `ollama list` 检查是否已下载 `qwen2.5:1.5b`；没有的话，在 Ollama 所在环境运行 `ollama pull qwen2.5:1.5b`。然后在运行 bedrockchat 的终端执行（无需 AWS 凭证或 API Key）：
 
 ```bash
-termtuck --provider openai --model qwen2.5:1.5b
+bedrockchat --provider openai --model qwen2.5:1.5b
 ```
 
-默认请求 `http://localhost:11434/v1/chat/completions`。若要排除 TermTuck 的影响，可在同一个终端用以下最小请求验证端点和模型（会发起一次模型推理）：
+默认请求 `http://localhost:11434/v1/chat/completions`。若要排除 bedrockchat 的影响，可在同一个终端用以下最小请求验证端点和模型（会发起一次模型推理）：
 
 ```bash
 curl --noproxy localhost -fsS --max-time 60 \
@@ -82,7 +82,7 @@ curl --noproxy localhost -fsS --max-time 60 \
   -d '{"model":"qwen2.5:1.5b","messages":[{"role":"user","content":"Who are you?"}],"stream":false}'
 ```
 
-如果连接被拒绝，检查 Ollama 是否运行，以及运行 TermTuck 的环境（例如 WSL）能否通过 `localhost` 访问它。若模型不存在，核对 `ollama list` 中的完整名称和标签。启动后可用 `/config` 确认 TermTuck 实际选择的后端和端点。
+如果连接被拒绝，检查 Ollama 是否运行，以及运行 bedrockchat 的环境（例如 WSL）能否通过 `localhost` 访问它。若模型不存在，核对 `ollama list` 中的完整名称和标签。启动后可用 `/config` 确认 bedrockchat 实际选择的后端和端点。
 
 如果地址不同，用 `--endpoint` 指定完整的 `/chat/completions` URL，或在 `config.toml` 中设置：
 
@@ -96,7 +96,7 @@ model_id = "qwen2.5:1.5b"
 stream = true
 ```
 
-如果上述 `curl` 请求成功，但服务不支持流式响应或未正确结束流，可将 `[openai]` 的 `stream` 改为 `false`，重启 TermTuck 后使用非流式 JSON。`qwen2.5:1.5b` 是文本模型；发送图片时请换用服务支持的视觉模型。兼容后端目前适用于不要求 API Key 的服务；仅回环地址可用 HTTP，其他地址须用 HTTPS。请求不会自动重试、跟随重定向或切换后端。聊天记录和上次使用的模型按后端及兼容端点隔离，避免历史被误发到新地址。用 `--provider bedrock` 可切回 AWS。
+如果上述 `curl` 请求成功，但服务不支持流式响应或未正确结束流，可将 `[openai]` 的 `stream` 改为 `false`，重启 bedrockchat 后使用非流式 JSON。`qwen2.5:1.5b` 是文本模型；发送图片时请换用服务支持的视觉模型。兼容后端目前适用于不要求 API Key 的服务；仅回环地址可用 HTTP，其他地址须用 HTTPS。请求不会自动重试、跟随重定向或切换后端。聊天记录和上次使用的模型按后端及兼容端点隔离，避免历史被误发到新地址。用 `--provider bedrock` 可切回 AWS。
 
 参考：[Ollama 的 OpenAI 兼容接口](https://docs.ollama.com/api/openai-compatibility)。
 
@@ -116,7 +116,7 @@ stream = true
 3. 用左右方向键跨过占位符，按 **Backspace** 或 **Delete** 可以整块删掉对应图片，不影响其他文字或图片。也可用 `/image drop 1` 或 `/image drop all`。
 4. 按 **Enter** 发送剩余的图片和文字；占位符不会作为文字发给模型，也不会保存在输入历史中。可以只发送图片。
 
-Windows Terminal 的普通粘贴（例如 **Ctrl+Shift+V**）继续用于文字；它通常不会把图片像素传给 WSL。**Ctrl+G** 专门触发图片读取；若被自定义 Windows Terminal 快捷键拦截，可免联网运行 `termtuck --check-clipboard` 排查，也可在聊天内输入 `/image paste`。程序通过 WSL interop 启动 Windows PowerShell 读取图片格式，不轮询剪贴板、不读剪贴板文本、不写临时截图文件。
+Windows Terminal 的普通粘贴（例如 **Ctrl+Shift+V**）继续用于文字；它通常不会把图片像素传给 WSL。**Ctrl+G** 专门触发图片读取；若被自定义 Windows Terminal 快捷键拦截，可免联网运行 `bedrockchat --check-clipboard` 排查，也可在聊天内输入 `/image paste`。程序通过 WSL interop 启动 Windows PowerShell 读取图片格式，不轮询剪贴板、不读剪贴板文本、不写临时截图文件。
 
 手动附加：`/image "./sample shot.png"`。默认缩放图片长边至不超过 1568 px，优先用无损 PNG 保护细字；可在 `[images]` 调整尺寸和字节上限。特别小的文字建议先裁剪图中相关区域，避免整屏缩放。每条消息最多 20 张，合计图片字节最多 15 MB，个别模型可能有更严格的限制。
 
@@ -163,7 +163,7 @@ uv build
 
 ### 本地 AWS CLI 认证模拟
 
-可选用系统已有的 AWS CLI v2；它不是运行时新增依赖。以下命令让真正的 `aws configure set` 在临时 HOME 下写入合成 Profile，再由 TermTuck 读取。未指定 `BEDROCK_TEST_AWS_CLI` 时，仅跳过这项需要真实 AWS CLI 的测试。
+可选用系统已有的 AWS CLI v2；它不是运行时新增依赖。以下命令让真正的 `aws configure set` 在临时 HOME 下写入合成 Profile，再由 bedrockchat 读取。未指定 `BEDROCK_TEST_AWS_CLI` 时，仅跳过这项需要真实 AWS CLI 的测试。
 
 ```bash
 BEDROCK_TEST_AWS_CLI="$(command -v aws)" uv run --locked pytest -q tests/test_aws_cli_lab.py
@@ -175,7 +175,7 @@ BEDROCK_TEST_AWS_CLI="$(command -v aws)" uv run --locked pytest -q tests/test_aw
 
 未在开发机上向真实 AWS 登录或调用 Bedrock，也未在真实 Windows Terminal + WSL2 上跑截图链路（开发机是 Debian，无 Windows 会话和 AWS 登录）。真机验收步骤：
 
-1. 截取一张**不含敏感数据**的窗口图片，在 WSL 运行 `termtuck --check-clipboard`，预期显示正确尺寸和非零大小，不产生模型调用。
-2. 运行 `termtuck`；输入半句文字，按 `Ctrl+G` 并确认草稿还在。再粘贴一张、移除其中一张，并确认底部数字随操作变化；另外检查普通文字粘贴和 `Esc` 后 `Enter` 换行。
+1. 截取一张**不含敏感数据**的窗口图片，在 WSL 运行 `bedrockchat --check-clipboard`，预期显示正确尺寸和非零大小，不产生模型调用。
+2. 运行 `bedrockchat`；输入半句文字，按 `Ctrl+G` 并确认草稿还在。再粘贴一张、移除其中一张，并确认底部数字随操作变化；另外检查普通文字粘贴和 `Esc` 后 `Enter` 换行。
 3. 用允许视觉输入的已授权模型发送图片和测试文字，确认收到流式回复和实际 Token；再追问一句验证多轮。发送一条较长的测试请求并按 `Ctrl+C`，确认能继续输入，且未知用量不显示为零。
 4. 切换到配置为 `vision = false` 的模型，确认附加图片被拒绝；待测试 Profile 的 SSO 会话自然过期后，确认提示重新登录。

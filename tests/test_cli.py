@@ -15,13 +15,13 @@ from bedrock_chat.config import load_settings
 from bedrock_chat.images import ImageAttachment
 
 
-def test_termtuck_and_legacy_commands_share_entry_point():
+def test_bedrockchat_and_legacy_commands_share_entry_point():
     scripts = {
         entry.name: entry.value
-        for entry in distribution("bedrock-chat").entry_points
+        for entry in distribution("bedrockchat").entry_points
         if entry.group == "console_scripts"
     }
-    assert scripts["termtuck"] == scripts["bedrock-chat"] == "bedrock_chat.cli:main"
+    assert scripts["bedrockchat"] == scripts["bedrock-chat"] == "bedrock_chat.cli:main"
 
 
 class FakeBedrock:
