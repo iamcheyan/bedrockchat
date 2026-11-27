@@ -5,9 +5,14 @@ import re
 import tomllib
 from dataclasses import dataclass
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from .i18n import LANGUAGES, tr
+
+PROVIDERS = ("bedrock", "openai")
+OLLAMA_ENDPOINT = "http://localhost:11434/v1/chat/completions"
 
 
 class ConfigError(ValueError):
@@ -54,6 +59,16 @@ class Settings:
     model_explicit: bool = False
     language: str = "zh"
     language_explicit: bool = False
+    provider: str = "bedrock"
+    endpoint: str = OLLAMA_ENDPOINT
+    openai_stream: bool = True
+
+    @property
+    def conversation_dir(self) -> Path:
+        if self.provider == "bedrock":
+            return self.history_dir
+        scope = sha256(self.endpoint.encode()).hexdigest()[:24]
+        return self.history_dir.with_name(f"{self.history_dir.name}-openai-{scope}")
 
     def resolve_model(self, choice: str) -> str:
         return self.models[choice].id if choice in self.models else validate_model(choice)
@@ -70,6 +85,40 @@ def validate_model(value: str) -> str:
     if re.search(r":prompt(?:-version)?/", value):
         raise ConfigError(tr("不支持 Prompt Management ARN；请使用模型 ID 或推理配置文件 ID/ARN。"))
     return value
+
+
+def validate_endpoint(value: str) -> str:
+    error = tr(
+        "兼容端点必须是完整的 /chat/completions URL；仅回环地址允许 HTTP，不得包含凭证、查询或片段。"
+    )
+    if not re.fullmatch(r"[\x21-\x7e]+", value) or any(c in value for c in "\\?#"):
+        raise ConfigError(error)
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        host = parsed.hostname
+    except ValueError:
+        raise ConfigError(error) from None
+    if (
+        not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or port == 0
+        or not parsed.path.endswith("/chat/completions")
+        or not re.fullmatch(
+            r"\[[0-9A-Fa-f:]+\](?::[0-9]+)?|[A-Za-z0-9.-]+(?::[0-9]+)?", parsed.netloc
+        )
+        or not (
+            parsed.scheme == "https"
+            or (parsed.scheme == "http" and host in {"localhost", "127.0.0.1", "::1"})
+        )
+    ):
+        raise ConfigError(error)
+    # Canonicalize scheme/host/default port to keep the state namespace stable.
+    netloc = f"[{host}]" if ":" in host else host
+    if port is not None and port != (443 if parsed.scheme == "https" else 80):
+        netloc += f":{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
 
 
 def validate_language(value: object) -> str:
@@ -145,14 +194,17 @@ def configured_language(raw: dict) -> str:
 def load_settings(args, *, raw: dict | None = None) -> Settings:
     if raw is None:
         raw = read_config(args)
-    _table(raw, {"aws", "chat", "history", "images", "models", "ui"}, tr("顶层"))
+    _table(raw, {"aws", "openai", "chat", "history", "images", "models", "ui"}, tr("顶层"))
     language = configured_language(raw)
     explicit_language = getattr(args, "lang", None)
     if explicit_language is not None:
         language = validate_language(explicit_language)
     aws = _table(raw.get("aws", {}), {"region", "profile", "model_id"}, "[aws]")
+    compatible = _table(raw.get("openai", {}), {"endpoint", "model_id", "stream"}, "[openai]")
     chat = _table(
-        raw.get("chat", {}), {"max_input_tokens", "max_output_tokens", "system_prompt"}, "[chat]"
+        raw.get("chat", {}),
+        {"provider", "max_input_tokens", "max_output_tokens", "system_prompt"},
+        "[chat]",
     )
     history = _table(raw.get("history", {}), {"enabled", "save_images"}, "[history]")
     images = _table(raw.get("images", {}), {"max_edge", "max_bytes"}, "[images]")
@@ -181,7 +233,18 @@ def load_settings(args, *, raw: dict | None = None) -> Settings:
         value = getattr(args, key, None)
         return table.get(key, default) if value is None else value
 
-    choice = _string(override("model_id", aws), "model_id", optional=True)
+    provider = override("provider", chat, "bedrock")
+    if provider not in PROVIDERS:
+        raise ConfigError(tr("后端必须是 bedrock 或 openai。"))
+    if provider != "openai" and getattr(args, "endpoint", None) is not None:
+        raise ConfigError(tr("--endpoint 仅可用于 --provider openai。"))
+    endpoint = validate_endpoint(
+        _string(override("endpoint", compatible, OLLAMA_ENDPOINT), "endpoint")
+    )
+    stream = _boolean(compatible.get("stream", True), "openai.stream")
+    choice = _string(
+        override("model_id", compatible if provider == "openai" else aws), "model_id", optional=True
+    )
     model_id = models[choice].id if choice in models else validate_model(choice) if choice else None
     region = _string(override("region", aws), "region", optional=True)
     if region is not None and not re.fullmatch(r"[a-z]{2}(?:-[a-z0-9]+)+-\d+", region):
@@ -207,4 +270,7 @@ def load_settings(args, *, raw: dict | None = None) -> Settings:
         model_explicit=getattr(args, "model_id", None) is not None,
         language=language,
         language_explicit=explicit_language is not None,
+        provider=provider,
+        endpoint=endpoint,
+        openai_stream=stream,
     )

@@ -26,6 +26,7 @@ from rich.markdown import Markdown
 from .bedrock import Bedrock, ChatError, build_request
 from .composer import MARK_END, MARK_START, ImageChips, TextHistory, markers, plain_text
 from .config import (
+    PROVIDERS,
     ConfigError,
     Settings,
     configured_language,
@@ -67,7 +68,7 @@ COMMAND_NAMES = list(dict.fromkeys(command.split()[0] for command in COMMANDS))
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="termtuck",
-        description=tr("支持图片、本地历史和 Token 预算的 AWS Bedrock 终端聊天"),
+        description=tr("支持图片、本地历史和 Token 预算的终端聊天"),
         add_help=False,
         allow_abbrev=False,
     )
@@ -82,13 +83,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--config", type=Path, help=tr("显式读取指定的 TOML 文件"))
     parser.add_argument("--lang", choices=LANGUAGES, help=tr("界面语言：中文、英语或日语"))
+    parser.add_argument("--provider", choices=PROVIDERS, help=tr("模型后端（默认 bedrock）"))
+    parser.add_argument("--endpoint", help=tr("OpenAI 兼容后端的完整 Chat Completions URL"))
     parser.add_argument("--region", help="AWS Region")
     parser.add_argument("--profile", help="AWS Profile")
     parser.add_argument(
-        "--model", dest="model_id", help=tr("Bedrock 模型 ID、推理配置文件 ID/ARN 或别名")
+        "--model", dest="model_id", help=tr("模型 ID 或别名；Bedrock 也支持推理配置文件 ID/ARN")
     )
     parser.add_argument("--max-input-tokens", type=int, help=tr("本地估算的输入 Token 预算"))
-    parser.add_argument("--max-output-tokens", type=int, help=tr("Bedrock 请求的最大输出 Token"))
+    parser.add_argument("--max-output-tokens", type=int, help=tr("请求的最大输出 Token"))
     parser.add_argument("--no-history", action="store_true", help=tr("不读写历史、图片或本地偏好"))
     parser.add_argument(
         "--no-save-images", action="store_true", help=tr("不保存图片字节到本地历史")
@@ -152,14 +155,26 @@ class Chat:
     def __init__(self, settings: Settings, console: Console, service: Bedrock | None = None):
         self.settings = settings
         self.console = console
-        self.service = (
-            service if service is not None else Bedrock(settings.region, settings.profile)
-        )
+        if service is not None:
+            self.service = service
+        elif settings.provider == "openai":
+            from .openai_compat import OpenAICompatible
+
+            self.service = OpenAICompatible(settings.endpoint, stream=settings.openai_stream)
+        else:
+            self.service = Bedrock(settings.region, settings.profile)
         self.store = HistoryStore(
-            settings.history_dir, enabled=settings.history_enabled, save_images=settings.save_images
+            settings.conversation_dir,
+            enabled=settings.history_enabled,
+            save_images=settings.save_images,
+        )
+        self.preferences = (
+            self.store
+            if settings.provider == "bedrock"
+            else HistoryStore(settings.history_dir, enabled=settings.history_enabled)
         )
         last_model = None if settings.model_explicit else self.store.load_last_model()
-        saved_language = None if settings.language_explicit else self.store.load_language()
+        saved_language = None if settings.language_explicit else self.preferences.load_language()
         self.language = saved_language or settings.language
         with using_language(self.language):
             self.session = self.store.new(tr("未命名"), model_id=last_model or settings.model_id)
@@ -322,15 +337,29 @@ class Chat:
             if turn.assistant:
                 self.console.print(_markdown(turn.assistant))
 
+    @property
+    def provider_name(self) -> str:
+        return "AWS Bedrock" if self.settings.provider == "bedrock" else "OpenAI-compatible"
+
     def _config(self) -> None:
         s = self.settings
-        self.say(
-            tr(
-                "Region：{region}；Profile：{profile}",
-                region=s.region or tr("由 boto3 解析"),
-                profile=s.profile or tr("boto3 默认凭证链"),
+        self.say(tr("后端：{provider}", provider=self.provider_name))
+        if s.provider == "bedrock":
+            self.say(
+                tr(
+                    "Region：{region}；Profile：{profile}",
+                    region=s.region or tr("由 boto3 解析"),
+                    profile=s.profile or tr("boto3 默认凭证链"),
+                )
             )
-        )
+        else:
+            self.say(
+                tr(
+                    "端点：{endpoint}；请求流式输出：{stream}",
+                    endpoint=s.endpoint,
+                    stream=tr("开启" if s.openai_stream else "关闭"),
+                )
+            )
         self.say(
             tr(
                 "模型：{model}；输入预算（估算）：{input}；输出上限：{output}",
@@ -439,7 +468,7 @@ class Chat:
                 self.language = language.lower()
                 with using_language(self.language):
                     try:
-                        self.store.save_language(self.language)
+                        self.preferences.save_language(self.language)
                     except (HistoryError, OSError):
                         self.say(tr("无法保存界面语言，下次启动时可能不会记住。"), style="yellow")
                     self.say(tr("界面语言已切换为：{language}", language=LANGUAGES[self.language]))
@@ -528,7 +557,7 @@ class Chat:
             self._remember_model(model)
         self.draft = "".join(self.attachments)
         if usage is None:
-            self.say(tr("本次 Token：未知（未收到 Bedrock 用量事件；不代表零费用）。"), style="dim")
+            self.say(tr("本次 Token：未知（服务未返回用量；不代表零费用）。"), style="dim")
         else:
             estimate = s.model_info(model).cost(
                 result.usage.input_tokens, result.usage.output_tokens
@@ -717,6 +746,7 @@ def _run(args: argparse.Namespace, raw: dict) -> int:
             raise ConfigError(tr("请在交互式 WSL2 终端运行；可用 --help 查看选项。"))
         chat = Chat(settings, console)
         chat.say(tr("TermTuck · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行"))
+        chat.say(tr("后端：{provider}", provider=chat.provider_name), style="dim")
         if chat.session.model_id:
             chat.say(tr("当前模型：{model}", model=chat.session.model_id), style="dim")
         else:

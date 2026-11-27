@@ -4,9 +4,9 @@
 
 **能发图、能接着聊，又不必把整段历史重发给模型的终端 AI 聊天工具。**
 
-TermTuck（Terminal + Tuck）面向 Windows Terminal + WSL2，使用 AWS Bedrock 流式回复，支持 Markdown、代码高亮和中日英多行对话。
+TermTuck（Terminal + Tuck）面向 Windows Terminal + WSL2，支持 AWS Bedrock 和 OpenAI 兼容服务的流式回复，支持 Markdown、代码高亮和中日英多行对话。
 
-- **图片附件**：粘贴 Windows 截图或附加本地图片，支持图文混发；只在主动发送时上传到 Bedrock。
+- **图片附件**：粘贴 Windows 截图或附加本地图片，支持图文混发；只在主动发送时传给选定的后端。
 - **本地会话记忆**：会话可以搜索、恢复和导出。保存的本地历史与实际发给模型的上下文相互独立。
 - **按预算裁剪上下文**：优先剔除最早的完整轮次，缩放新图片，默认不重发历史图片，不为摘要额外调用模型。支持设置输出上限，并显示实际 Token 和可选费用估算。
 
@@ -65,6 +65,30 @@ install -m 600 config.example.toml "$config_dir/config.toml"
 
 编辑文件中的 `[aws]`（`profile`、`region`、`model_id`），然后运行 `termtuck`。`[models.<别名>]` 可配置 `id`、`vision`，以及每百万 Token 的 USD 输入、输出价格。`vision = false` 会在本地明确阻止图片；未标注则以 Bedrock 的实际响应为准，不额外请求模型能力信息。运行 `/model` 查看列表，用 `/model <别名或 ID>` 切换。新启动时的模型优先级是 `--model` → 上次选用的模型 → `[aws].model_id`。通过 `/model` 切换后立即记住，成功完成对话也会更新记录；记录只包含模型 ID，保存在历史目录的 `last-model` 文件中。`/resume` 仍使用会话自己的模型。关闭历史时不读取或保存上次模型。
 
+## 使用本机 Ollama 或其他兼容端点
+
+默认仍使用 Bedrock。Ollama 已在本机运行、且模型已下载时，不需要 AWS 凭证或 API Key：
+
+```bash
+termtuck --provider openai --model qwen2.5:1.5b
+```
+
+默认请求 `http://localhost:11434/v1/chat/completions`。如果地址不同，用 `--endpoint` 指定完整的 `/chat/completions` URL，或在 `config.toml` 中设置：
+
+```toml
+[chat]
+provider = "openai"
+
+[openai]
+endpoint = "http://localhost:11434/v1/chat/completions"
+model_id = "qwen2.5:1.5b"
+stream = true
+```
+
+只支持非流式 JSON 的服务可设置 `stream = false`。`qwen2.5:1.5b` 是文本模型；发送图片时请换用服务支持的视觉模型。兼容后端目前适用于不要求 API Key 的服务；仅回环地址可用 HTTP，其他地址须用 HTTPS。请求不会自动重试、跟随重定向或切换后端。聊天记录和上次使用的模型按后端及兼容端点隔离，避免历史被误发到新地址。用 `--provider bedrock` 可切回 AWS。
+
+参考：[Ollama 的 OpenAI 兼容接口](https://docs.ollama.com/api/openai-compatibility)。
+
 ## 输入与截图
 
 | 操作 | 快捷键 |
@@ -110,9 +134,9 @@ Windows Terminal 的普通粘贴（例如 **Ctrl+Shift+V**）继续用于文字�
 ## Token 和数据边界
 
 - 默认没有系统提示词，模型请求不带工具、Function Calling、扩展思考参数或自动收集的上下文；不支持可能预置额外指令或工具的 Prompt Management ARN。不会执行生成的命令，也不会读取仓库或扫描目录作为模型上下文。
-- `max_input_tokens`（默认 6000）是跨模型的**本地估算**预算，不是模型分词器测得的硬上限；请求超预算时先剔除最早的完整对话轮次，当前消息本身超预算会在联网前提示。实际模型窗口请按所选模型留出余量。`max_output_tokens`（默认 1024）是发送给 Bedrock 的输出上限。中断、失败或只有图片而没有文本的历史轮次不会作为后续上下文重发；历史图片字节从不自动重发。只有显式发送消息才会发起模型请求，不自动重试、总计 Token 或总结历史。
-- 回复结束显示 Bedrock `metadata.usage` 的输入、输出、总量和当前会话累计。断流时如果没拿到用量，会明确显示未知，不按零费用算。费用按已知用量及配置价格估算，不代表发票、模型缓存价格或其它费用。
-- 不上传历史文件、不自动转发图片或企业资料、不收集遥测、不保存 AWS 凭证。**按 Enter 主动发送的消息、已附加图片及预算内的历史文本会发送到配置 Region 管理的 AWS Bedrock 服务**。请勿发送不允许进入 Bedrock 的数据。AWS SDK 在实际请求时可以按选定凭证机制访问 SSO、STS 等 AWS 认证服务；组织应单独审查 IAM、跨区推理、代理及 Bedrock 推理日志设置。
+- `max_input_tokens`（默认 6000）是跨模型的**本地估算**预算，不是模型分词器测得的硬上限；请求超预算时先剔除最早的完整对话轮次，当前消息本身超预算会在联网前提示。实际模型窗口请按所选模型留出余量。`max_output_tokens`（默认 1024）是发送给所选后端的输出上限。中断、失败或只有图片而没有文本的历史轮次不会作为后续上下文重发；历史图片字节从不自动重发。只有显式发送消息才会发起模型请求，不自动重试、总计 Token 或总结历史。
+- 回复结束显示后端返回的 Token 输入、输出、总量和当前会话累计。断流时如果没拿到用量，会明确显示未知，不按零费用算。费用按已知用量及配置价格估算，不代表发票、模型缓存价格或其它费用。
+- 不上传历史文件、不自动转发图片或企业资料、不收集遥测、不保存 AWS 凭证。**按 Enter 主动发送的消息、已附加图片及预算内的历史文本会发送到选定的后端**：AWS Bedrock，或明确启用的兼容端点。请仅向受信任的服务发送获准处理的数据。AWS SDK 在实际请求时可以按选定凭证机制访问 SSO、STS 等 AWS 认证服务；组织应单独审查 IAM、跨区推理、代理及 Bedrock 推理日志设置。
 
 ## 开发与验收
 

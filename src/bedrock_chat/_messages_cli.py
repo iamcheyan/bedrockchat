@@ -69,9 +69,34 @@ MESSAGES = {
     "查看或切换界面语言": ("Show or change the interface language", "表示言語を確認・切り替え"),
     "显示本帮助": ("Show this help", "このヘルプを表示"),
     "退出": ("Exit", "終了"),
-    "支持图片、本地历史和 Token 预算的 AWS Bedrock 终端聊天": (
-        "AWS Bedrock terminal chat with images, local history, and a token budget",
-        "画像・ローカル履歴・トークン予算に対応した AWS Bedrock ターミナルチャット",
+    "支持图片、本地历史和 Token 预算的终端聊天": (
+        "Terminal chat with images, local history, and a token budget",
+        "画像・ローカル履歴・トークン予算に対応したターミナルチャット",
+    ),
+    "模型后端（默认 bedrock）": (
+        "Model backend (default: bedrock)",
+        "モデルのバックエンド（既定：bedrock）",
+    ),
+    "OpenAI 兼容后端的完整 Chat Completions URL": (
+        "Full Chat Completions URL for the OpenAI-compatible backend",
+        "OpenAI 互換バックエンドの Chat Completions URL（完全な URL）",
+    ),
+    "后端：{provider}": ("Backend: {provider}", "バックエンド：{provider}"),
+    "端点：{endpoint}；请求流式输出：{stream}": (
+        "Endpoint: {endpoint}; request streaming: {stream}",
+        "エンドポイント：{endpoint}；ストリーミング要求：{stream}",
+    ),
+    "后端必须是 bedrock 或 openai。": (
+        "The backend must be bedrock or openai.",
+        "バックエンドは bedrock または openai を指定してください。",
+    ),
+    "--endpoint 仅可用于 --provider openai。": (
+        "--endpoint can only be used with --provider openai.",
+        "--endpoint は --provider openai の場合にのみ使用できます。",
+    ),
+    "兼容端点必须是完整的 /chat/completions URL；仅回环地址允许 HTTP，不得包含凭证、查询或片段。": (
+        "Use a full /chat/completions URL without credentials, a query, or a fragment. HTTP is only allowed on loopback.",
+        "認証情報・クエリ・フラグメントのない /chat/completions の完全な URL を指定してください。HTTP はループバックのみ使用できます。",
     ),
     "位置参数": ("positional arguments", "位置引数"),
     "选项": ("options", "オプション"),
@@ -85,17 +110,17 @@ MESSAGES = {
         "Interface language: Chinese, English, or Japanese",
         "表示言語：中国語、英語、日本語",
     ),
-    "Bedrock 模型 ID、推理配置文件 ID/ARN 或别名": (
-        "Bedrock model ID, inference profile ID/ARN, or alias",
-        "Bedrock モデル ID、推論プロファイルの ID/ARN、または別名",
+    "模型 ID 或别名；Bedrock 也支持推理配置文件 ID/ARN": (
+        "Model ID or alias; Bedrock also accepts an inference profile ID/ARN",
+        "モデル ID または別名。Bedrock では推論プロファイルの ID/ARN も指定できます",
     ),
     "本地估算的输入 Token 预算": (
         "Locally estimated input token budget",
         "ローカルで見積もる入力トークンの予算",
     ),
-    "Bedrock 请求的最大输出 Token": (
-        "Maximum output tokens in the Bedrock request",
-        "Bedrock リクエストの最大出力トークン数",
+    "请求的最大输出 Token": (
+        "Maximum output tokens in the request",
+        "リクエストの最大出力トークン数",
     ),
     "不读写历史、图片或本地偏好": (
         "Do not read or save history, images, or local preferences",
@@ -257,9 +282,9 @@ MESSAGES = {
         "Could not save this turn to local history: {error}",
         "このターンをローカル履歴に保存できませんでした：{error}",
     ),
-    "本次 Token：未知（未收到 Bedrock 用量事件；不代表零费用）。": (
-        "Tokens for this request: unknown (no usage event from Bedrock; charges may still apply).",
-        "今回のトークン数：不明（Bedrock の使用量イベントを受信していません。課金される場合があります）。",
+    "本次 Token：未知（服务未返回用量；不代表零费用）。": (
+        "Tokens for this request: unknown (the service did not report usage; charges may still apply).",
+        "今回のトークン数：不明（サービスが使用量を返しませんでした。課金される場合があります）。",
     ),
     "；预估 US${cost:.8f}": ("; estimated cost: US${cost:.8f}", "；概算 US${cost:.8f}"),
     "本次 Token：输入 {input} / 输出 {output} / 总计 {total}": (

@@ -23,9 +23,10 @@ def using_language(language: str) -> Iterator[None]:
 def _catalog() -> dict[str, tuple[str, str]]:
     from ._messages_backend import MESSAGES as backend
     from ._messages_cli import MESSAGES as cli
+    from ._messages_openai import MESSAGES as openai
     from ._messages_storage import MESSAGES as storage
 
-    return {**backend, **storage, **cli}
+    return {**backend, **storage, **cli, **openai}
 
 
 def tr(message: str, **values: object) -> str:

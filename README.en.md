@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · English · [日本語](README.ja.md)
 
-TermTuck is a terminal chat app for AWS Bedrock. It streams replies with Markdown and code highlighting, accepts image attachments, and keeps local chat history separate from the text sent back to the model. When the estimated input exceeds the configured budget, it drops the oldest complete turns first. It never automatically resends historical images.
+TermTuck is a terminal chat app for AWS Bedrock and OpenAI-compatible endpoints. It streams replies with Markdown and code highlighting, accepts image attachments, and keeps local chat history separate from the text sent back to the model. When the estimated input exceeds the configured budget, it drops the oldest complete turns first. It never automatically resends historical images.
 
 ## Install
 
@@ -37,6 +37,12 @@ Replace the example profile, Region, and model with ones your account can use. T
 
 To keep settings, copy [config.example.toml](config.example.toml) to `$XDG_CONFIG_HOME/bedrock-chat/config.toml` (default `~/.config/bedrock-chat/config.toml`) without overwriting an existing file, or pass `--config PATH`. Set `profile`, `region`, and `model_id` under `[aws]` as needed. Never put AWS secrets in this file.
 
+## Use local Ollama or another compatible endpoint
+
+With Ollama already running and the model downloaded, run `termtuck --provider openai --model qwen2.5:1.5b`. The default endpoint is `http://localhost:11434/v1/chat/completions`. Use `--endpoint <full-url>` for a different service, or set `[chat].provider = "openai"` and configure `[openai]` as shown in [the sample configuration](config.example.toml). Set `stream = false` under `[openai]` for JSON-only endpoints.
+
+This backend currently supports services that do not require an API key. HTTP is restricted to loopback addresses; other endpoints require HTTPS. Use an image-capable model to send images (`qwen2.5:1.5b` is text-only). History and the last model are isolated by backend and endpoint. Bedrock remains the default.
+
 ## Choose the interface language
 
 From your shell, start TermTuck with `termtuck --lang zh` (Simplified Chinese), `termtuck --lang en` (English), or `termtuck --lang ja` (Japanese).
@@ -60,7 +66,7 @@ language = "zh"
 
 Each attachment appears inline as `[Image #1]`, `[Image #2]`, and so on. You can continue editing around a marker. Press **Backspace** just after it or **Delete** just before it to remove the entire attachment. Only the remaining images are sent; the markers themselves are not sent as text or saved in input history.
 
-Attachments are sent only when you send a message. The message, attached images, and any retained context text go to Bedrock. Local chat history is not encrypted, and image bytes are not saved to history by default. Use `/history` to list saved chats and `/resume <ID>` to reopen one.
+Attachments are sent only when you send a message. The message, attached images, and any retained context text go only to the selected backend. Local chat history is not encrypted, and image bytes are not saved to history by default. Use `/history` to list saved chats and `/resume <ID>` to reopen one.
 
 ## Validation limits
 

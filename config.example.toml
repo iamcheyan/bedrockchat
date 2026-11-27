@@ -6,9 +6,15 @@
 # model_id = "nova-lite" # 也可填实际模型 ID 或推理配置文件 ID/ARN
 
 [chat]
-max_input_tokens = 6000   # 本地估算预算，非 Bedrock 精确 Token 限制
-max_output_tokens = 1024 # 请求的 inferenceConfig.maxTokens
-system_prompt = ""       # 留空时不发送 system 字段
+provider = "bedrock"     # 改为 "openai" 启用 OpenAI 兼容后端
+max_input_tokens = 6000  # 本地估算预算，非模型的精确 Token 限制
+max_output_tokens = 1024 # 请求的输出上限
+system_prompt = ""       # 留空时不发送系统提示词
+
+[openai]
+# endpoint = "http://localhost:11434/v1/chat/completions"
+# model_id = "qwen2.5:1.5b"
+# stream = true          # 若服务只返回非流式 JSON，可设置为 false
 
 [ui]
 language = "zh"          # 界面语言：zh（简体中文）、en（英语）、ja（日语）；不影响模型回复
