@@ -16,6 +16,7 @@ system_prompt = ""       # 留空时不发送系统提示词
 # endpoint = "http://localhost:11434/v1/chat/completions"
 # model_id = "qwen2.5:1.5b"
 # stream = true          # 若服务只返回非流式 JSON，可设置为 false
+# response_timeout = "5m" # Go 版：等待响应数据的空闲上限；冷启动/识图可设为 "10m"
 
 [ui]
 language = "zh"          # 界面语言：zh（简体中文）、en（英语）、ja（日语）；不影响模型回复

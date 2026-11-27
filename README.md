@@ -61,6 +61,18 @@ bedrockchat --provider openai --model qwen2.5:1.5b
 
 只在发送时才请求模型。默认不发送系统提示词，不重发历史图片，不调用工具、自动总结、自动重试或后台检查更新。输入预算按完整轮次裁剪，模型服务没有返回用量时显示未知。Windows 剪贴板需在有 Windows Terminal + WSL2 的机器上验收。
 
+### 本地视觉模型响应超时
+
+Qwen3-VL 等本地模型可能需要较长时间加载权重或编码图片。兼容后端默认允许等待 **5 分钟**而不是旧版的 60 秒；这是等待响应数据的空闲上限，每收到一批数据会重新计时，不是总运行时限。连接超时仍为 5 秒，Bedrock 的等待设置不变。可用 `Ctrl+C` 随时取消，不会自动重试请求。
+
+例如，在 Ollama 已运行并下载模型后：
+
+```bash
+bedrockchat --provider openai --model qwen3-vl:4b --response-timeout 10m
+```
+
+也可在配置文件 `[openai]` 下设置 `response_timeout = "10m"`（支持 1 秒至 1 小时）；`/config` 会显示有效值。命令行参数优先。若仍超时，检查 Ollama 服务是否仍在加载或推理，以及内存、显存是否足够；先试一张较小的图片，或在服务支持时用 `/think off` 降低推理耗时。当前开发环境没有运行真实 Qwen3-VL，慢响应路径使用本地 HTTP 模拟服务验证。
+
 ### 模型推理开关
 
 `/think on` 请求开启扩展推理，`/think off` 请求关闭，`/think auto` 恢复模型默认行为（也是初始默认，不发送额外推理参数）。切换立即影响后续请求，但不会修改配置文件。`/think` 或 `/config` 可查看当前模式。启动时用 `bedrockchat --thinking off`，或在配置的 `[chat]` 中设置 `thinking = "off"` 来固定启动模式；命令行参数优先。

@@ -51,6 +51,70 @@ func TestOpenAISSEVisionAndUsage(t *testing.T) {
 	}
 }
 
+func TestOpenAIReadTimeoutAllowsSlowVision(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stream      bool
+		wait        time.Duration
+		wantTimeout bool
+	}{
+		{"wait for response headers", false, 2 * time.Second, false},
+		{"wait between stream chunks", true, 2 * time.Second, false},
+		{"bounded wait for response headers", false, 30 * time.Millisecond, true},
+		{"bounded wait between stream chunks", true, 30 * time.Millisecond, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if _, err := io.Copy(io.Discard, r.Body); err != nil {
+					return
+				}
+				if tc.stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+					w.(http.Flusher).Flush()
+				}
+				select {
+				case <-r.Context().Done():
+					return
+				case <-time.After(120 * time.Millisecond):
+				}
+				if tc.stream {
+					fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\" complete\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+				} else {
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprint(w, `{"choices":[{"message":{"content":"complete"},"finish_reason":"stop"}]}`)
+				}
+			}))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			req := Request{Model: "qwen3-vl:4b", Text: "describe", MaxOutput: 64,
+				Images: []Image{{Data: []byte{1, 2}, Format: "png", Width: 32, Height: 32}}}
+			got := NewOpenAIWithReadTimeout(server.URL+completionPath, tc.stream, tc.wait).Send(ctx, req, nil)
+			want := "complete"
+			if tc.stream {
+				want = "partial complete"
+			}
+			if tc.wantTimeout {
+				want = ""
+				if tc.stream {
+					want = "partial"
+				}
+				if !errors.Is(got.Err, errOATimeout) || !strings.Contains(got.Err.Error(), "--response-timeout") {
+					t.Fatalf("expected timeout with help, got %+v", got)
+				}
+			} else if got.Err != nil || got.StopReason != "end_turn" {
+				t.Fatalf("slow response failed: %+v", got)
+			}
+			if got.Text != want || calls.Load() != 1 {
+				t.Fatalf("unexpected result or retry: %+v, calls=%d", got, calls.Load())
+			}
+		})
+	}
+}
+
 func TestOpenAIJSON(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(fmt.Sprint(stream), func(t *testing.T) {

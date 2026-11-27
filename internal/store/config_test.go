@@ -5,7 +5,33 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestOpenAIResponseTimeoutConfigAndOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	for _, tc := range []struct {
+		config, override string
+		want             time.Duration
+	}{
+		{"", "", 5 * time.Minute},
+		{"[openai]\nresponse_timeout = '8m'", "", 8 * time.Minute},
+		{"[openai]\nresponse_timeout = '8m'", "10m", 10 * time.Minute},
+		{"[openai]\nresponse_timeout = 90", "", 0},
+		{"", "0s", 0},
+		{"", "2h", 0},
+	} {
+		writeTestFile(t, path, tc.config)
+		got, err := Load(Options{ConfigPath: path, Provider: "openai", ResponseTimeout: tc.override})
+		if tc.want == 0 {
+			if err == nil || !strings.Contains(err.Error(), "openai.response_timeout") {
+				t.Fatalf("expected timeout validation error, got %v", err)
+			}
+		} else if err != nil || got.ResponseTimeout != tc.want {
+			t.Fatalf("timeout = %v, want %v; error = %v", got.ResponseTimeout, tc.want, err)
+		}
+	}
+}
 
 func TestThinkingConfigAndOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")

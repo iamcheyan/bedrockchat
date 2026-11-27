@@ -52,6 +52,7 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	flags.StringVar(&opt.Profile, "profile", "", "AWS Profile")
 	flags.StringVar(&opt.Model, "model", "", "model ID or alias")
 	flags.StringVar(&opt.Thinking, "thinking", "", "model thinking: auto, on, or off")
+	flags.StringVar(&opt.ResponseTimeout, "response-timeout", "", "OpenAI-compatible response idle timeout, e.g. 5m or 10m")
 	flags.StringVar(&opt.Language, "lang", "", "zh, en or ja")
 	flags.IntVar(&opt.MaxInput, "max-input-tokens", 0, "estimated input token budget")
 	flags.IntVar(&opt.MaxOutput, "max-output-tokens", 0, "maximum output tokens")
@@ -118,7 +119,7 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	}
 	var backend chat.Backend
 	if cfg.Provider == "openai" {
-		backend = chat.NewOpenAI(cfg.Endpoint, cfg.Stream)
+		backend = chat.NewOpenAIWithReadTimeout(cfg.Endpoint, cfg.Stream, cfg.ResponseTimeout)
 	} else {
 		backend = chat.NewBedrock(cfg.Region, cfg.Profile)
 	}
@@ -644,6 +645,7 @@ func (a *app) command(msg string) bool {
 		a.showThinking()
 		if a.cfg.Provider == "openai" {
 			a.line(a.cfg.Endpoint)
+			a.line("response_timeout=" + a.cfg.ResponseTimeout.String())
 		} else {
 			a.line("AWS Region: " + a.cfg.Region + " · Profile: " + a.cfg.Profile)
 		}

@@ -24,7 +24,9 @@ import (
 const (
 	connectTimeout = 5 * time.Second
 	ioTimeout      = 60 * time.Second
-	maxResponse    = 8 << 20
+	// Local models can spend minutes loading weights and encoding an image.
+	DefaultOpenAIReadTimeout = 5 * time.Minute
+	maxResponse              = 8 << 20
 )
 
 var (
@@ -47,6 +49,15 @@ type OpenAI struct {
 // NewOpenAI uses an explicit, unauthenticated Chat Completions endpoint.
 // Invalid endpoints are reported as a safe error by Send, before any network I/O.
 func NewOpenAI(endpoint string, stream bool) *OpenAI {
+	return NewOpenAIWithReadTimeout(endpoint, stream, DefaultOpenAIReadTimeout)
+}
+
+// NewOpenAIWithReadTimeout bounds each period of waiting for response data,
+// not the total request duration. Connect and write timeouts are unchanged.
+func NewOpenAIWithReadTimeout(endpoint string, stream bool, readTimeout time.Duration) *OpenAI {
+	if readTimeout <= 0 {
+		readTimeout = DefaultOpenAIReadTimeout
+	}
 	u := parseEndpoint(endpoint)
 	b := &OpenAI{endpoint: u, stream: stream}
 	if u == nil {
@@ -65,7 +76,7 @@ func NewOpenAI(endpoint string, stream bool) *OpenAI {
 	}
 	b.client = &http.Client{
 		Transport: &http.Transport{
-			DialContext: timedDial(dialer), TLSHandshakeTimeout: connectTimeout,
+			DialContext: dialWithReadTimeout(dialer, readTimeout), TLSHandshakeTimeout: connectTimeout,
 			DisableKeepAlives: true, DisableCompression: true,
 		},
 		CheckRedirect: noRedirect,
@@ -100,10 +111,13 @@ func parseEndpoint(raw string) *url.URL {
 
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
-type idleConn struct{ net.Conn }
+type idleConn struct {
+	net.Conn
+	readTimeout time.Duration
+}
 
 func (c idleConn) Read(p []byte) (int, error) {
-	if err := c.SetReadDeadline(time.Now().Add(ioTimeout)); err != nil {
+	if err := c.SetReadDeadline(time.Now().Add(c.readTimeout)); err != nil {
 		return 0, err
 	}
 	return c.Conn.Read(p)
@@ -117,12 +131,16 @@ func (c idleConn) Write(p []byte) (int, error) {
 }
 
 func timedDial(dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	return dialWithReadTimeout(dialer, ioTimeout)
+}
+
+func dialWithReadTimeout(dialer *net.Dialer, readTimeout time.Duration) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		conn, err := dialer.DialContext(ctx, network, addr)
 		if err != nil {
 			return nil, err
 		}
-		return idleConn{conn}, nil
+		return idleConn{Conn: conn, readTimeout: readTimeout}, nil
 	}
 }
 
@@ -267,7 +285,7 @@ func (b *OpenAI) Send(ctx context.Context, req Request, onText func(string)) Res
 func openAIIoError(err error) error {
 	var timeout net.Error
 	if errors.As(err, &timeout) && timeout.Timeout() {
-		return errOATimeout
+		return fmt.Errorf("%w; for a slow model response, increase --response-timeout", errOATimeout)
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return errOAIncomplete

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/iamcheyan/bedrockchat/internal/chat"
@@ -23,7 +24,7 @@ type Options struct {
 	ConfigPath, Provider, Endpoint, Region, Profile, Model, Language string
 	MaxInput, MaxOutput                                              int
 	NoHistory, NoSaveImages                                          bool
-	Thinking                                                         string
+	Thinking, ResponseTimeout                                        string
 }
 
 type Settings struct {
@@ -32,6 +33,7 @@ type Settings struct {
 	Stream, History, SaveImages                                                             bool
 	Models                                                                                  map[string]ModelInfo
 	Thinking                                                                                chat.Thinking
+	ResponseTimeout                                                                         time.Duration
 }
 
 type ModelInfo struct {
@@ -273,7 +275,7 @@ func parseConfig(raw map[string]any, o Options) (Settings, error) {
 		return r.table(fallback(raw, name, map[string]any{}), "["+name+"]", keys...)
 	}
 	aws := table("aws", "region", "profile", "model_id")
-	openai := table("openai", "endpoint", "model_id", "stream")
+	openai := table("openai", "endpoint", "model_id", "stream", "response_timeout")
 	conversation := table("chat", "provider", "max_input_tokens", "max_output_tokens", "system_prompt", "thinking")
 	s.Thinking = chat.Thinking(r.text(prefer(o.Thinking, fallback(conversation, "thinking", "auto")), "chat.thinking", true))
 	if !s.Thinking.Valid() {
@@ -331,6 +333,14 @@ func parseConfig(raw map[string]any, o Options) (Settings, error) {
 		r.reject("openai.endpoint", err.Error())
 	}
 	s.Stream = r.boolean(fallback(openai, "stream", true), "openai.stream")
+	if o.ResponseTimeout != "" && s.Provider != "openai" {
+		r.reject("--response-timeout", "requires provider openai")
+	}
+	timeout := r.text(prefer(o.ResponseTimeout, fallback(openai, "response_timeout", chat.DefaultOpenAIReadTimeout.String())), "openai.response_timeout", true)
+	s.ResponseTimeout, err = time.ParseDuration(timeout)
+	if err != nil || s.ResponseTimeout < time.Second || s.ResponseTimeout > time.Hour {
+		r.reject("openai.response_timeout", "expected a duration from 1s to 1h, for example 5m")
+	}
 	backend := aws
 	if s.Provider == "openai" {
 		backend = openai
