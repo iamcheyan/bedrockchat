@@ -25,6 +25,7 @@ type Options struct {
 	MaxInput, MaxOutput                                              int
 	NoHistory, NoSaveImages                                          bool
 	Thinking, ResponseTimeout                                        string
+	SaveImages, Stream                                               *bool
 }
 
 type Settings struct {
@@ -173,6 +174,28 @@ func Load(o Options) (Settings, error) {
 			return s, errors.New("cannot read configuration file; check permissions and TOML syntax")
 		}
 	}
+	if raw == nil {
+		raw = make(map[string]any)
+	}
+	probe := o
+	if o.Provider == "" {
+		// The saved provider is needed before provider-specific overrides
+		// can be validated. Validate them in the final parse instead.
+		probe.Endpoint = ""
+		probe.ResponseTimeout = ""
+	}
+	baseline, err := parseConfig(raw, probe)
+	if err != nil {
+		return Settings{}, err
+	}
+	if !baseline.History {
+		return parseConfig(raw, o)
+	}
+	prefs, err := (Store{Root: baseline.StateDir, Enabled: true}).RuntimePreferences()
+	if err != nil {
+		return Settings{}, err
+	}
+	applyRuntimePreferences(raw, prefs)
 	return parseConfig(raw, o)
 }
 
@@ -333,6 +356,9 @@ func parseConfig(raw map[string]any, o Options) (Settings, error) {
 		r.reject("openai.endpoint", err.Error())
 	}
 	s.Stream = r.boolean(fallback(openai, "stream", true), "openai.stream")
+	if o.Stream != nil {
+		s.Stream = *o.Stream
+	}
 	if o.ResponseTimeout != "" && s.Provider != "openai" {
 		r.reject("--response-timeout", "requires provider openai")
 	}
@@ -366,7 +392,11 @@ func parseConfig(raw map[string]any, o Options) (Settings, error) {
 	s.MaxEdge = r.integer(fallback(images, "max_edge", int64(1568)), 64, 8000, "images.max_edge")
 	s.MaxBytes = r.integer(fallback(images, "max_bytes", int64(1500000)), 1024, 3750000, "images.max_bytes")
 	s.History = r.boolean(fallback(history, "enabled", true), "history.enabled") && !o.NoHistory
-	s.SaveImages = r.boolean(fallback(history, "save_images", false), "history.save_images") && s.History && !o.NoSaveImages
+	s.SaveImages = r.boolean(fallback(history, "save_images", false), "history.save_images")
+	if o.SaveImages != nil {
+		s.SaveImages = *o.SaveImages
+	}
+	s.SaveImages = s.SaveImages && s.History && !o.NoSaveImages
 	if r.err != nil {
 		return Settings{}, r.err
 	}

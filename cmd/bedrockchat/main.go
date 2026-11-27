@@ -43,6 +43,7 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	}
 	var opt store.Options
 	var showVersion, clipboard, current bool
+	var saveImages, stream bool
 	flags := flag.NewFlagSet("bedrockchat", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.StringVar(&opt.ConfigPath, "config", "", "TOML config file")
@@ -57,7 +58,9 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	flags.IntVar(&opt.MaxInput, "max-input-tokens", 0, "estimated input token budget")
 	flags.IntVar(&opt.MaxOutput, "max-output-tokens", 0, "maximum output tokens")
 	flags.BoolVar(&opt.NoHistory, "no-history", false, "do not read or save chat history or preferences")
-	flags.BoolVar(&opt.NoSaveImages, "no-save-images", false, "do not save new image bytes")
+	flags.BoolVar(&opt.NoSaveImages, "no-save-images", false, "remember not to save new image bytes")
+	flags.BoolVar(&saveImages, "save-images", false, "save new image bytes; use --save-images=false to disable")
+	flags.BoolVar(&stream, "stream", true, "OpenAI-compatible streaming; use --stream=false for JSON")
 	flags.BoolVar(&clipboard, "check-clipboard", false, "read Windows clipboard image locally and report its size")
 	flags.BoolVar(&current, "current-model", false, "print the effective model and exit")
 	flags.BoolVar(&showVersion, "version", false, "print version and exit")
@@ -71,6 +74,14 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 		}
 		return 2
 	}
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "save-images":
+			opt.SaveImages = &saveImages
+		case "stream":
+			opt.Stream = &stream
+		}
+	})
 	if flags.NArg() != 0 {
 		flags.Usage()
 		return 2
@@ -141,6 +152,7 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	a.editor.PasteLabel = func(number, lines int) string {
 		return fmt.Sprintf(a.tr("[粘贴 #%d · %d 行]", "[Pasted #%d · %d lines]", "[貼り付け #%d · %d 行]"), number, lines)
 	}
+	a.rememberStartup(opt)
 	a.line("bedrockchat · /help")
 	a.showModel()
 	for {
@@ -638,6 +650,10 @@ func (a *app) command(msg string) bool {
 	case "/think":
 		if len(args) == 1 && chat.Thinking(args[0]).Valid() {
 			a.cfg.Thinking = chat.Thinking(args[0])
+			a.problem(a.prefs.UpdateRuntimePreferences(func(p *store.RuntimePreferences) error {
+				p.Thinking = args[0]
+				return nil
+			}))
 		} else if len(args) != 0 {
 			a.line(a.tr("用法：/think [on|off|auto]", "Usage: /think [on|off|auto]", "使い方：/think [on|off|auto]"))
 			break

@@ -24,4 +24,6 @@ exports/
 history/
 last-model
 ui-language
+runtime-preferences.json
+.preferences.lock
 /bedrock-chat-*.md

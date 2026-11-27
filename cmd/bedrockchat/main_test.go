@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamcheyan/bedrockchat/internal/chat"
 	"github.com/iamcheyan/bedrockchat/internal/store"
@@ -90,6 +91,59 @@ func TestFoldedPastesExpandInPlaceAndAreNeverCommands(t *testing.T) {
 	command := "/exit\n"
 	if !a.dispatch([]terminal.Part{{Paste: &command}}) || len(backend.requests) != 2 || backend.requests[1].Text != command {
 		t.Fatal("pasted command text must be sent as a message, not executed")
+	}
+}
+
+func TestThinkChoiceSurvivesRestartWithoutSending(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg, err := store.Load(store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	h := store.Store{Root: cfg.StateDir, Enabled: true}
+	backend := &testBackend{}
+	a := app{cfg: cfg, prefs: h, history: h, out: &out, backend: backend, lang: "en"}
+	a.dispatch([]terminal.Part{{Text: "/think off"}})
+	a.dispatch([]terminal.Part{{Text: "/think invalid"}})
+	restarted, err := store.Load(store.Options{})
+	if err != nil || restarted.Thinking != chat.ThinkingOff || len(backend.requests) != 0 {
+		t.Fatalf("thinking did not persist locally: %v, %v", restarted.Thinking, err)
+	}
+}
+
+func TestStartupChoicesAreRememberedAndPrivateModeDoesNotOverwrite(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	stream, save := false, true
+	o := store.Options{Provider: "openai", Model: "fixture.model", Thinking: "off", MaxInput: 2048, MaxOutput: 512, ResponseTimeout: "10m", Stream: &stream, SaveImages: &save}
+	cfg, err := store.Load(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	h := store.Store{Root: cfg.ConversationDir, Enabled: true}
+	a := app{cfg: cfg, history: h, prefs: store.Store{Root: cfg.StateDir, Enabled: true}, session: h.New("test", cfg.Model), out: &out}
+	a.rememberStartup(o)
+	restarted, err := store.Load(store.Options{})
+	if err != nil || restarted.Provider != "openai" || restarted.Thinking != "off" || restarted.MaxOutput != 512 || restarted.MaxInput != 2048 || restarted.ResponseTimeout != 10*time.Minute || restarted.Stream || !restarted.SaveImages {
+		t.Fatalf("settings not restored: %+v, %v, %s", restarted, err, &out)
+	}
+	if got := (store.Store{Root: restarted.ConversationDir, Enabled: true}).LastModel(); got != "fixture.model" {
+		t.Fatalf("model not remembered: %q", got)
+	}
+	private, err := store.Load(store.Options{NoHistory: true, Thinking: "on"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.cfg = private
+	a.prefs.Enabled = false
+	a.history.Enabled = false
+	a.rememberStartup(store.Options{NoHistory: true, Thinking: "on"})
+	restored, err := store.Load(store.Options{})
+	if err != nil || restored.Thinking != "off" {
+		t.Fatalf("private setting leaked: %s, %v", restored.Thinking, err)
 	}
 }
 

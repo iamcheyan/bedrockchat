@@ -8,6 +8,37 @@ import (
 	"time"
 )
 
+func TestSavedRuntimeChoicesOverrideDefaultsButNotFlags(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	initial, err := Load(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefs := Store{Root: initial.StateDir, Enabled: true}
+	if err := prefs.UpdateRuntimePreferences(func(p *RuntimePreferences) error {
+		p.Provider = "openai"
+		p.Thinking = "off"
+		p.ResponseTimeout = "10m"
+		p.MaxOutput = 2048
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := Load(Options{})
+	if err != nil || saved.Provider != "openai" || saved.Thinking != "off" || saved.ResponseTimeout != 10*time.Minute || saved.MaxOutput != 2048 {
+		t.Fatalf("saved state: %+v, %v", saved, err)
+	}
+	explicit, err := Load(Options{Thinking: "on", MaxOutput: 512})
+	if err != nil || explicit.Thinking != "on" || explicit.MaxOutput != 512 {
+		t.Fatalf("explicit state: %+v, %v", explicit, err)
+	}
+	private, err := Load(Options{NoHistory: true})
+	if err != nil || private.Provider != "bedrock" || private.Thinking != "auto" || private.MaxOutput != 1024 {
+		t.Fatalf("private state: %+v, %v", private, err)
+	}
+}
+
 func TestOpenAIResponseTimeoutConfigAndOverride(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	for _, tc := range []struct {

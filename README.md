@@ -61,6 +61,16 @@ bedrockchat --provider openai --model qwen2.5:1.5b
 | 用量与上下文 | `/tokens` 查看实际用量，`/clear` 只清空发送上下文 |
 | 界面语言 | `/lang zh`、`/lang en`、`/lang ja`，也可用 `--lang` |
 
+### 记住最后的设置
+
+正常启动时会记住显式传入的后端、端点、AWS Region/Profile、推理模式、Token 上限、兼容后端超时和流式输出，以及是否保存图片。`/think off`、`/model` 和 `/lang` 的选择立即保存，不必先发送消息；重新启动会继续使用最后的选择。
+
+优先级是 **本次命令行参数 → 上次保存的选择 → TOML 配置 → 默认值**。模型按后端/端点分别记忆；语言与其他运行偏好在本机共享。图片缩放、系统提示词、价格等配置仍直接保存在 TOML 中，不复制聊天内容或 AWS 凭证。
+
+运行偏好位于状态目录的 `runtime-preferences.json`（默认 `~/.local/state/bedrock-chat/runtime-preferences.json`），权限为 `0600`；不会改写配置文件。删除这个文件即可恢复为 TOML/默认设置，模型和语言仍使用各自的旧偏好文件。`--help`、`--version`、`--current-model`、`--check-clipboard` 和 `update` 不会保存本次选项。
+
+`--no-history` 或 `[history] enabled = false` 仍是临时模式，不加载或保存这些偏好，也不会覆盖旧选择。可以用 `--stream=false` / `--stream=true` 切换并记住兼容后端是否流式输出，用 `--save-images=false` / `--save-images=true` 切换并记住图片保存开关；`--no-save-images` 等同于关闭图片保存。历史开关本身不自动记忆，以免一次临时会话永久关闭保存。
+
 只在发送时才请求模型。默认不发送系统提示词，不重发历史图片，不调用工具、自动总结、自动重试或后台检查更新。输入预算按完整轮次裁剪，模型服务没有返回用量时显示未知。Windows 剪贴板需在有 Windows Terminal + WSL2 的机器上验收。
 
 ### 多行文本与代码粘贴
@@ -87,7 +97,7 @@ bedrockchat --provider openai --model qwen3-vl:4b --response-timeout 10m
 
 ### 模型推理开关
 
-`/think on` 请求开启扩展推理，`/think off` 请求关闭，`/think auto` 恢复模型默认行为（也是初始默认，不发送额外推理参数）。切换立即影响后续请求，但不会修改配置文件。`/think` 或 `/config` 可查看当前模式。启动时用 `bedrockchat --thinking off`，或在配置的 `[chat]` 中设置 `thinking = "off"` 来固定启动模式；命令行参数优先。
+`/think on` 请求开启扩展推理，`/think off` 请求关闭，`/think auto` 恢复模型默认行为（也是初始默认，不发送额外推理参数）。切换立即影响后续请求并保存到本地偏好，重启后继续使用；不改写 TOML 配置文件。`/think` 或 `/config` 可查看当前模式。启动时用 `bedrockchat --thinking off`，或在配置的 `[chat]` 中设置 `thinking = "off"` 来固定启动模式；命令行参数优先。
 
 - **AWS Bedrock**：支持识别出的 Claude 推理模型，包括 `jp.anthropic.claude-haiku-5-5`。旧版手动推理模型使用 1024 Token 的思考预算，开启时 `--max-output-tokens` 必须大于 1024，例如 2048。不能关闭推理的模型或未识别的模型 ID 会报提示，可用 `auto` 恢复兼容模式。
 - **Ollama / OpenAI 兼容端点**：分别发送 `reasoning_effort: "low"` 或 `"none"`。端点和模型必须支持相应值；例如 Ollama 的 GPT-OSS 会把 `none` 当作低推理而不是完全关闭。端点拒绝参数时，请用 `auto`，程序不会自动重发请求。
