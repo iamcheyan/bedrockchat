@@ -75,6 +75,25 @@ func TestLocalModelCommandsAndMultimodalContext(t *testing.T) {
 	}
 }
 
+func TestThinkCommandControlsSubsequentRequests(t *testing.T) {
+	var out bytes.Buffer
+	backend := &testBackend{}
+	h := store.Store{}
+	a := app{cfg: store.Settings{Provider: "openai", MaxInput: 1024, MaxOutput: 64, Thinking: "auto"},
+		history: h, session: h.New("fixture", "test.model"), backend: backend, out: &out, lang: "en"}
+	for i, mode := range []chat.Thinking{chat.ThinkingOn, chat.ThinkingOff, chat.ThinkingAuto} {
+		a.dispatch([]terminal.Part{{Text: "/think " + string(mode)}})
+		a.dispatch([]terminal.Part{{Text: "/think invalid"}})
+		if len(backend.requests) != i || !strings.Contains(out.String(), "Thinking mode: "+string(mode)) {
+			t.Fatalf("command did not set %s locally: %s", mode, out.String())
+		}
+		a.dispatch([]terminal.Part{{Text: "hello"}})
+		if len(backend.requests) != i+1 || backend.requests[i].Thinking != mode {
+			t.Fatalf("request did not use %s: %+v", mode, backend.requests)
+		}
+	}
+}
+
 func TestVersionAndCurrentModelDoNotNeedTerminal(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())

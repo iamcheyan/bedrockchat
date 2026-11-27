@@ -51,6 +51,7 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	flags.StringVar(&opt.Region, "region", "", "AWS Region")
 	flags.StringVar(&opt.Profile, "profile", "", "AWS Profile")
 	flags.StringVar(&opt.Model, "model", "", "model ID or alias")
+	flags.StringVar(&opt.Thinking, "thinking", "", "model thinking: auto, on, or off")
 	flags.StringVar(&opt.Language, "lang", "", "zh, en or ja")
 	flags.IntVar(&opt.MaxInput, "max-input-tokens", 0, "estimated input token budget")
 	flags.IntVar(&opt.MaxOutput, "max-output-tokens", 0, "maximum output tokens")
@@ -210,6 +211,14 @@ func (a *app) showModel() {
 	}
 	a.line(a.tr("当前模型：", "Current model: ", "現在のモデル：") + model + " · " + a.cfg.Provider)
 }
+func (a *app) showThinking() {
+	mode := a.cfg.Thinking
+	if mode == "" {
+		mode = chat.ThinkingAuto
+	}
+	a.line(a.tr("推理模式：", "Thinking mode: ", "推論モード：") + string(mode))
+}
+
 func (a *app) renderReply(s string) {
 	if a.markdown != nil {
 		if rendered, err := a.markdown.Render(clean(s)); err == nil {
@@ -280,7 +289,7 @@ func (a *app) dispatch(parts []terminal.Part) bool {
 			history = append(history, chat.Pair{User: t.User, Assistant: t.Assistant})
 		}
 	}
-	req, estimated, dropped, err := chat.Trim(chat.Request{Model: a.session.Model, Text: msg, System: a.cfg.System, History: history, Images: imgs, MaxOutput: a.cfg.MaxOutput}, a.cfg.MaxInput)
+	req, estimated, dropped, err := chat.Trim(chat.Request{Model: a.session.Model, Text: msg, System: a.cfg.System, History: history, Images: imgs, MaxOutput: a.cfg.MaxOutput, Thinking: a.cfg.Thinking}, a.cfg.MaxInput)
 	if err != nil {
 		a.problem(err)
 		return true
@@ -618,12 +627,21 @@ func (a *app) command(msg string) bool {
 		} else {
 			bad()
 		}
+	case "/think":
+		if len(args) == 1 && chat.Thinking(args[0]).Valid() {
+			a.cfg.Thinking = chat.Thinking(args[0])
+		} else if len(args) != 0 {
+			a.line(a.tr("用法：/think [on|off|auto]", "Usage: /think [on|off|auto]", "使い方：/think [on|off|auto]"))
+			break
+		}
+		a.showThinking()
 	case "/config":
 		if len(args) != 0 {
 			bad()
 			break
 		}
 		a.showModel()
+		a.showThinking()
 		if a.cfg.Provider == "openai" {
 			a.line(a.cfg.Endpoint)
 		} else {
@@ -631,7 +649,7 @@ func (a *app) command(msg string) bool {
 		}
 		a.line(fmt.Sprintf("max_input_tokens=%d · max_output_tokens=%d · history=%t · save_images=%t · lang=%s", a.cfg.MaxInput, a.cfg.MaxOutput, a.cfg.History, a.cfg.SaveImages, a.lang))
 	case "/help":
-		a.line("/model [ID] · /new [name] · /history [query] · /resume <ID>\n/show [n] · /rename <ID> <name> · /delete <ID> · /clear · /tokens\n/image <path|paste|list|drop|reuse> · /export [path] · /config · /lang [zh|en|ja] · /exit")
+		a.line("/model [ID] · /new [name] · /history [query] · /resume <ID>\n/show [n] · /rename <ID> <name> · /delete <ID> · /clear · /tokens\n/image <path|paste|list|drop|reuse> · /export [path] · /config · /lang [zh|en|ja] · /exit\n/think [on|off|auto]")
 		a.line(a.tr("Enter 发送 · Esc+Enter 换行 · Ctrl+G 粘贴图片 · Backspace/Delete 删除图片 · Ctrl+R 查输入历史", "Enter send · Esc+Enter newline · Ctrl+G paste image · Backspace/Delete remove image · Ctrl+R search input history", "Enter 送信 · Esc+Enter 改行 · Ctrl+G 画像を貼り付け · Backspace/Delete 画像削除 · Ctrl+R 入力履歴検索"))
 	default:
 		bad()

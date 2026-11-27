@@ -15,6 +15,7 @@ import (
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 	"github.com/aws/smithy-go"
 	"github.com/aws/smithy-go/logging"
@@ -149,10 +150,17 @@ func (b *Bedrock) getClient(ctx context.Context) (converseStream, error) {
 	return b.client, nil
 }
 
-func bedrockInput(req Request) *bedrockruntime.ConverseStreamInput {
+func bedrockInput(req Request) (*bedrockruntime.ConverseStreamInput, error) {
+	fields, err := bedrockThinking(req)
+	if err != nil {
+		return nil, err
+	}
 	input := &bedrockruntime.ConverseStreamInput{
 		ModelId:         aws.String(req.Model),
 		InferenceConfig: &types.InferenceConfiguration{MaxTokens: aws.Int32(int32(req.MaxOutput))},
+	}
+	if fields != nil {
+		input.AdditionalModelRequestFields = document.NewLazyDocument(fields)
 	}
 	if req.System != "" {
 		input.System = []types.SystemContentBlock{&types.SystemContentBlockMemberText{Value: req.System}}
@@ -173,7 +181,7 @@ func bedrockInput(req Request) *bedrockruntime.ConverseStreamInput {
 		current.Content = append(current.Content, &types.ContentBlockMemberText{Value: req.Text})
 	}
 	input.Messages = append(input.Messages, current)
-	return input
+	return input, nil
 }
 
 func (b *Bedrock) Send(ctx context.Context, req Request, onText func(string)) Result {
@@ -188,11 +196,15 @@ func (b *Bedrock) Send(ctx context.Context, req Request, onText func(string)) Re
 	if req.MaxOutput > math.MaxInt32 {
 		return fail(errors.New("output token limit is too large for Bedrock"))
 	}
+	input, err := bedrockInput(req)
+	if err != nil {
+		return fail(err)
+	}
 	call, err := b.getClient(ctx)
 	if err != nil {
 		return fail(bedrockError(err, len(req.Images) > 0))
 	}
-	stream, err := call(ctx, bedrockInput(req))
+	stream, err := call(ctx, input)
 	if err != nil {
 		return fail(bedrockError(err, len(req.Images) > 0))
 	}

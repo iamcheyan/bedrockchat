@@ -50,6 +50,7 @@ bedrockchat --provider openai --model qwen2.5:1.5b
 |---|---|
 | 发送 / 换行 / 中断 | Enter / Esc 后按 Enter / Ctrl+C |
 | 查看或切换模型 | `/model`、`/model <ID 或别名>` |
+| 查看或切换模型推理 | `/think`、`/think on`、`/think off`、`/think auto` |
 | 粘贴 Windows 截图 | Ctrl+G（需 WSL interop）；本地诊断 `bedrockchat --check-clipboard` |
 | 删除指定待发图片 | 对占位符用 Backspace 或 Delete |
 | 图片文件、列表或移除 | `/image <路径>`、`/image list`、`/image drop [序号或 all]` |
@@ -59,6 +60,15 @@ bedrockchat --provider openai --model qwen2.5:1.5b
 | 界面语言 | `/lang zh`、`/lang en`、`/lang ja`，也可用 `--lang` |
 
 只在发送时才请求模型。默认不发送系统提示词，不重发历史图片，不调用工具、自动总结、自动重试或后台检查更新。输入预算按完整轮次裁剪，模型服务没有返回用量时显示未知。Windows 剪贴板需在有 Windows Terminal + WSL2 的机器上验收。
+
+### 模型推理开关
+
+`/think on` 请求开启扩展推理，`/think off` 请求关闭，`/think auto` 恢复模型默认行为（也是初始默认，不发送额外推理参数）。切换立即影响后续请求，但不会修改配置文件。`/think` 或 `/config` 可查看当前模式。启动时用 `bedrockchat --thinking off`，或在配置的 `[chat]` 中设置 `thinking = "off"` 来固定启动模式；命令行参数优先。
+
+- **AWS Bedrock**：支持识别出的 Claude 推理模型，包括 `jp.anthropic.claude-haiku-5-5`。旧版手动推理模型使用 1024 Token 的思考预算，开启时 `--max-output-tokens` 必须大于 1024，例如 2048。不能关闭推理的模型或未识别的模型 ID 会报提示，可用 `auto` 恢复兼容模式。
+- **Ollama / OpenAI 兼容端点**：分别发送 `reasoning_effort: "low"` 或 `"none"`。端点和模型必须支持相应值；例如 Ollama 的 GPT-OSS 会把 `none` 当作低推理而不是完全关闭。端点拒绝参数时，请用 `auto`，程序不会自动重发请求。
+
+开关控制的是模型请求，不是推理过程的显示。单独返回的推理字段不会显示、保存或加入下一轮；启用推理可能增加耗时和输出 Token。参考 [AWS Bedrock 自适应推理](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)、[Ollama 兼容接口](https://docs.ollama.com/api/openai-compatibility)。
 
 ## 发布
 

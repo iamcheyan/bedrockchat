@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/iamcheyan/bedrockchat/internal/chat"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,6 +23,7 @@ type Options struct {
 	ConfigPath, Provider, Endpoint, Region, Profile, Model, Language string
 	MaxInput, MaxOutput                                              int
 	NoHistory, NoSaveImages                                          bool
+	Thinking                                                         string
 }
 
 type Settings struct {
@@ -29,6 +31,7 @@ type Settings struct {
 	MaxInput, MaxOutput, MaxEdge, MaxBytes                                                  int
 	Stream, History, SaveImages                                                             bool
 	Models                                                                                  map[string]ModelInfo
+	Thinking                                                                                chat.Thinking
 }
 
 type ModelInfo struct {
@@ -271,7 +274,11 @@ func parseConfig(raw map[string]any, o Options) (Settings, error) {
 	}
 	aws := table("aws", "region", "profile", "model_id")
 	openai := table("openai", "endpoint", "model_id", "stream")
-	conversation := table("chat", "provider", "max_input_tokens", "max_output_tokens", "system_prompt")
+	conversation := table("chat", "provider", "max_input_tokens", "max_output_tokens", "system_prompt", "thinking")
+	s.Thinking = chat.Thinking(r.text(prefer(o.Thinking, fallback(conversation, "thinking", "auto")), "chat.thinking", true))
+	if !s.Thinking.Valid() {
+		r.reject("chat.thinking", "expected auto, on, or off")
+	}
 	history := table("history", "enabled", "save_images")
 	images := table("images", "max_edge", "max_bytes")
 	ui := table("ui", "language")

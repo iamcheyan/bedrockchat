@@ -138,15 +138,22 @@ type oaPart struct {
 }
 
 type oaPayload struct {
-	Model         string          `json:"model"`
-	Messages      []oaMessage     `json:"messages"`
-	MaxTokens     int             `json:"max_tokens"`
-	Stream        bool            `json:"stream"`
-	StreamOptions map[string]bool `json:"stream_options,omitempty"`
+	Model           string          `json:"model"`
+	Messages        []oaMessage     `json:"messages"`
+	MaxTokens       int             `json:"max_tokens"`
+	Stream          bool            `json:"stream"`
+	StreamOptions   map[string]bool `json:"stream_options,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
 }
 
 func openAIPayload(req Request, stream bool) (oaPayload, error) {
 	p := oaPayload{Model: req.Model, MaxTokens: req.MaxOutput, Stream: stream}
+	switch req.Thinking {
+	case ThinkingOn:
+		p.ReasoningEffort = "low"
+	case ThinkingOff:
+		p.ReasoningEffort = "none"
+	}
 	if stream {
 		p.StreamOptions = map[string]bool{"include_usage": true}
 	}
@@ -213,6 +220,9 @@ func (b *OpenAI) Send(ctx context.Context, req Request, onText func(string)) Res
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		if payload.ReasoningEffort != "" && (response.StatusCode == http.StatusBadRequest || response.StatusCode == http.StatusUnprocessableEntity) {
+			return fail(fmt.Errorf("OpenAI-compatible request failed (HTTP %d); check thinking support or use /think auto", response.StatusCode))
+		}
 		return fail(fmt.Errorf("OpenAI-compatible request failed (HTTP %d)", response.StatusCode))
 	}
 	if response.ContentLength > maxResponse {

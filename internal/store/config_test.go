@@ -7,6 +7,27 @@ import (
 	"testing"
 )
 
+func TestThinkingConfigAndOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	for _, tc := range []struct{ config, override, want string }{
+		{"", "", "auto"},
+		{"[chat]\nthinking = 'off'", "", "off"},
+		{"[chat]\nthinking = 'on'", "off", "off"},
+		{"[chat]\nthinking = 'invalid'", "", ""},
+		{"", "invalid", ""},
+	} {
+		writeTestFile(t, path, tc.config)
+		got, err := Load(Options{ConfigPath: path, Thinking: tc.override})
+		if tc.want == "" {
+			if err == nil {
+				t.Fatal("accepted invalid thinking setting")
+			}
+		} else if err != nil || string(got.Thinking) != tc.want {
+			t.Fatalf("thinking = %q, want %q: %v", got.Thinking, tc.want, err)
+		}
+	}
+}
+
 func TestLoadLegacyConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

@@ -30,6 +30,7 @@ type Request struct {
 	History             []Pair
 	Images              []Image
 	MaxOutput           int
+	Thinking            Thinking
 }
 
 // Result retains text and any valid usage even if the request fails.
@@ -63,6 +64,9 @@ func hasText(s string) bool { return strings.TrimSpace(s) != "" }
 func validTurn(turn Pair) bool { return hasText(turn.User) && hasText(turn.Assistant) }
 
 func validateCurrent(req Request) error {
+	if req.Thinking != "" && !req.Thinking.Valid() {
+		return errThinkingMode
+	}
 	if len(req.Model) > 2048 || !modelID.MatchString(req.Model) {
 		return errModel
 	}

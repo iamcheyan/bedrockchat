@@ -10,6 +10,7 @@ provider = "bedrock"     # 改为 "openai" 启用 OpenAI 兼容后端
 max_input_tokens = 6000  # 本地估算预算，非模型的精确 Token 限制
 max_output_tokens = 1024 # 请求的输出上限
 system_prompt = ""       # 留空时不发送系统提示词
+# thinking = "auto"      # Go 版：auto 用模型默认值，on 开启，off 关闭（需模型支持）
 
 [openai]
 # endpoint = "http://localhost:11434/v1/chat/completions"
