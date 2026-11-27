@@ -17,12 +17,13 @@ import (
 // ErrInterrupted is returned when Ctrl+C cancels the draft.
 var ErrInterrupted = errors.New("input interrupted")
 
-// Part is text or an atomic image. Read returns parts in draft order, with
-// adjacent text coalesced and without display labels. If an initial part has
-// both fields, its text precedes its image.
+// Part is ordinary text, an atomic image, or an atomic pasted text block.
+// Read returns draft order without display labels. Expand Paste to its actual
+// text before building a request; it must never be interpreted as a command.
 type Part struct {
 	Text  string
 	Image *chat.Image
+	Paste *string
 }
 
 // Editor owns input buffering and in-memory text history between reads. Use it
@@ -31,6 +32,8 @@ type Editor struct {
 	// ImageLabel optionally supplies a plain-text label for an attachment. It
 	// is for display only; nil or an empty result uses the default label.
 	ImageLabel func(chat.Image) string
+	// PasteLabel receives the stable paste number and the line count.
+	PasteLabel func(number, lines int) string
 
 	in      *os.File
 	out     io.Writer
@@ -91,6 +94,15 @@ func (e *Editor) Read(initial []Part, paste func() (chat.Image, error), onError 
 	}
 
 	label := func(c cell) string {
+		if c.Paste != nil {
+			lines := pasteLines(*c.Paste)
+			if e.PasteLabel != nil {
+				if text := singleLine(e.PasteLabel(c.seq, lines)); text != "" {
+					return text
+				}
+			}
+			return fmt.Sprintf("[Pasted #%d · %d lines]", c.seq, lines)
+		}
 		if e.ImageLabel != nil {
 			if text := singleLine(e.ImageLabel(*c.Image)); text != "" {
 				return text
@@ -144,7 +156,7 @@ func (e *Editor) Read(initial []Part, paste func() (chat.Image, error), onError 
 		}
 		if search != nil {
 			switch k {
-			case keyText, 8, 127, 18:
+			case keyText, keyPaste, 8, 127, 18:
 				search.update(k, text, e.history)
 				continue
 			case 0x1b, 7: // Esc or Ctrl+G cancels search without changing the draft.
@@ -162,11 +174,18 @@ func (e *Editor) Read(initial []Part, paste func() (chat.Image, error), onError 
 				}
 			}
 		}
-		if chord && k == 4 {
+		if chord {
 			chord = false
-			d.dropNewest()
-			h = len(e.history)
-			continue
+			if k == 4 {
+				d.dropNewest()
+				h = len(e.history)
+				continue
+			}
+			if k == 5 { // Ctrl+X then Ctrl+E expands the adjacent pasted block.
+				d.expandPaste()
+				h = len(e.history)
+				continue
+			}
 		}
 		chord = k == 24 // Ctrl+X
 		if k != keyUp && k != keyDown && k != keyIgnore && k != 0x1b {
@@ -179,7 +198,7 @@ func (e *Editor) Read(initial []Part, paste func() (chat.Image, error), onError 
 			} else {
 				var b strings.Builder
 				for _, c := range d.cells {
-					if c.Image == nil {
+					if !c.atomic() {
 						b.WriteString(c.Text)
 					} else {
 						b.WriteString(label(c))
@@ -191,6 +210,8 @@ func (e *Editor) Read(initial []Part, paste func() (chat.Image, error), onError 
 			return d.parts(), err
 		case keyText:
 			d.insertText(text)
+		case keyPaste:
+			d.insertPaste(text)
 		case '\t':
 			d.insertText("\t")
 		case keyNewline:
@@ -264,7 +285,7 @@ type historySearch struct {
 func (s *historySearch) update(k key, text string, history []string) {
 	from := len(history) - 1
 	switch k {
-	case keyText:
+	case keyText, keyPaste:
 		s.query += text
 	case 8, 127:
 		if c := cellsFor(s.query); len(c) > 0 {

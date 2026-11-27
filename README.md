@@ -52,7 +52,9 @@ bedrockchat --provider openai --model qwen2.5:1.5b
 | 查看或切换模型 | `/model`、`/model <ID 或别名>` |
 | 查看或切换模型推理 | `/think`、`/think on`、`/think off`、`/think auto` |
 | 粘贴 Windows 截图 | Ctrl+G（需 WSL interop）；本地诊断 `bedrockchat --check-clipboard` |
-| 删除指定待发图片 | 对占位符用 Backspace 或 Delete |
+| 删除指定待发图片或文本块 | 对占位符用 Backspace 或 Delete |
+| 多行或长文本粘贴 | 终端普通粘贴；多行或超过 1000 字符会折叠 |
+| 展开粘贴文本继续编辑 | 光标放在文本块前或后，按 Ctrl+X 再 Ctrl+E |
 | 图片文件、列表或移除 | `/image <路径>`、`/image list`、`/image drop [序号或 all]` |
 | 会话记忆 | `/new`、`/history [关键词]`、`/resume <ID>`、`/show`、`/rename`、`/delete`、`/export` |
 | 输入历史 | 方向键、Ctrl+R |
@@ -60,6 +62,16 @@ bedrockchat --provider openai --model qwen2.5:1.5b
 | 界面语言 | `/lang zh`、`/lang en`、`/lang ja`，也可用 `--lang` |
 
 只在发送时才请求模型。默认不发送系统提示词，不重发历史图片，不调用工具、自动总结、自动重试或后台检查更新。输入预算按完整轮次裁剪，模型服务没有返回用量时显示未知。Windows 剪贴板需在有 Windows Terminal + WSL2 的机器上验收。
+
+### 多行文本与代码粘贴
+
+从网页、编辑器或日志窗口复制内容后，用终端普通粘贴（Windows Terminal 通常为 Ctrl+Shift+V）。在支持 bracketed paste 的终端/tmux 中，多行文本会在光标处折叠成 `[粘贴 #1 · 12 行]`，超过 1000 字符的单行内容也会折叠。可混合输入文字、图片和多个文本块，粘贴不会自动发送，也不会触发图片剪贴板读取。
+
+用方向键跨过整个块；Backspace 或 Delete 删除该块，Ctrl+X 再 Ctrl+E 展开光标旁的文本块，之后像普通文字一样编辑。Enter 发送时在原位置展开剩余文本，保留换行、空白、代码缩进和 Markdown；历史与模型收到的都是实际文本，不是占位符。折叠只整理界面，不减少这些文本的 Token，仍受输入预算限制。
+
+终端接收的是剪贴板中的纯文本，不保留网页字体、颜色或 HTML/RTF 排版，也不自动上传文件。每次粘贴上限 1 MiB，超限会提示且不插入。输入历史恢复的是展开后的文字，图片不会自动重发。
+
+实现方式参考 [Codex 的大段粘贴占位符](https://github.com/openai/codex/blob/afe555b9d3e95b4f58b247212565070f1555bc5d/codex-rs/tui/src/bottom_pane/chat_composer.rs)和 [OpenCode 的粘贴文本块](https://github.com/anomalyco/opencode/blob/08cc1967e2bbf97e12381d25f9ae58cb5c74a51b/packages/tui/src/component/prompt/index.tsx#L1444-L1516)，没有引入 Agent 框架。
 
 ### 本地视觉模型响应超时
 

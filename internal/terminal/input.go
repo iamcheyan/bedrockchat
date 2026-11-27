@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,6 +23,7 @@ const (
 	keyDelete
 	keyNewline
 	keyPasteTooLarge
+	keyPaste
 	keyIgnore
 )
 
@@ -154,7 +156,7 @@ func (in *input) bracketedPaste() (key, string, error) {
 				if tooLarge {
 					return keyPasteTooLarge, "", nil
 				}
-				return keyText, cleanText(text.String()), nil
+				return keyPaste, cleanText(ansi.Strip(text.String())), nil
 			}
 			continue
 		}

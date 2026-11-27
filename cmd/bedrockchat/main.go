@@ -138,6 +138,9 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 		a.markdown, _ = glamour.NewTermRenderer(glamour.WithStylePath("dark"), glamour.WithWordWrap(min(width, 100)))
 	}
 	a.editor.ImageLabel = func(_ chat.Image) string { return a.tr("[图片]", "[Image]", "[画像]") }
+	a.editor.PasteLabel = func(number, lines int) string {
+		return fmt.Sprintf(a.tr("[粘贴 #%d · %d 行]", "[Pasted #%d · %d lines]", "[貼り付け #%d · %d 行]"), number, lines)
+	}
 	a.line("bedrockchat · /help")
 	a.showModel()
 	for {
@@ -244,16 +247,20 @@ func (a *app) dispatch(parts []terminal.Part) bool {
 	var text strings.Builder
 	var imgs []chat.Image
 	var pending []terminal.Part
+	hasPaste := false
 	for _, p := range parts {
 		if p.Image != nil {
 			imgs = append(imgs, *p.Image)
 			pending = append(pending, p)
+		} else if p.Paste != nil {
+			hasPaste = true
+			text.WriteString(*p.Paste)
 		} else {
 			text.WriteString(p.Text)
 		}
 	}
 	msg := text.String()
-	if strings.HasPrefix(msg, "/") && !strings.HasPrefix(msg, "//") && !strings.Contains(msg, "\n") {
+	if !hasPaste && strings.HasPrefix(msg, "/") && !strings.HasPrefix(msg, "//") && !strings.Contains(msg, "\n") {
 		a.draft = pending
 		if a.editor != nil {
 			a.editor.Remember(msg)
@@ -265,7 +272,7 @@ func (a *app) dispatch(parts []terminal.Part) bool {
 		return true
 	}
 	a.draft = parts
-	if strings.HasPrefix(msg, "//") {
+	if !hasPaste && strings.HasPrefix(msg, "//") {
 		msg = msg[1:]
 	}
 	if a.session.Model == "" {
@@ -652,7 +659,7 @@ func (a *app) command(msg string) bool {
 		a.line(fmt.Sprintf("max_input_tokens=%d · max_output_tokens=%d · history=%t · save_images=%t · lang=%s", a.cfg.MaxInput, a.cfg.MaxOutput, a.cfg.History, a.cfg.SaveImages, a.lang))
 	case "/help":
 		a.line("/model [ID] · /new [name] · /history [query] · /resume <ID>\n/show [n] · /rename <ID> <name> · /delete <ID> · /clear · /tokens\n/image <path|paste|list|drop|reuse> · /export [path] · /config · /lang [zh|en|ja] · /exit\n/think [on|off|auto]")
-		a.line(a.tr("Enter 发送 · Esc+Enter 换行 · Ctrl+G 粘贴图片 · Backspace/Delete 删除图片 · Ctrl+R 查输入历史", "Enter send · Esc+Enter newline · Ctrl+G paste image · Backspace/Delete remove image · Ctrl+R search input history", "Enter 送信 · Esc+Enter 改行 · Ctrl+G 画像を貼り付け · Backspace/Delete 画像削除 · Ctrl+R 入力履歴検索"))
+		a.line(a.tr("Enter 发送 · Esc+Enter 换行 · Ctrl+G 粘贴图片 · Backspace/Delete 删除占位符 · Ctrl+X 再 Ctrl+E 展开粘贴文本 · Ctrl+R 查输入历史", "Enter send · Esc+Enter newline · Ctrl+G paste image · Backspace/Delete remove chip · Ctrl+X then Ctrl+E expand pasted text · Ctrl+R search input history", "Enter 送信 · Esc+Enter 改行 · Ctrl+G 画像貼り付け · Backspace/Delete マーカー削除 · Ctrl+X の後 Ctrl+E で貼り付けを展開 · Ctrl+R 入力履歴検索"))
 	default:
 		bad()
 	}

@@ -75,6 +75,24 @@ func TestLocalModelCommandsAndMultimodalContext(t *testing.T) {
 	}
 }
 
+func TestFoldedPastesExpandInPlaceAndAreNeverCommands(t *testing.T) {
+	var out bytes.Buffer
+	backend := &testBackend{}
+	h := store.Store{}
+	a := app{cfg: store.Settings{Provider: "openai", MaxInput: 1024, MaxOutput: 64}, history: h, session: h.New("fixture", "test.model"), backend: backend, out: &out, lang: "en"}
+	paste := "first\n\t日本語\n"
+	img := chat.Image{Data: []byte{1}, Format: "png", Name: "fixture.png", Width: 1, Height: 1}
+	a.dispatch([]terminal.Part{{Text: "before "}, {Paste: &paste}, {Image: &img}, {Text: "after"}})
+	want := "before " + paste + "after"
+	if len(backend.requests) != 1 || backend.requests[0].Text != want || len(backend.requests[0].Images) != 1 || a.session.Turns[0].User != want {
+		t.Fatalf("paste was not expanded at its original position: %+v", backend.requests)
+	}
+	command := "/exit\n"
+	if !a.dispatch([]terminal.Part{{Paste: &command}}) || len(backend.requests) != 2 || backend.requests[1].Text != command {
+		t.Fatal("pasted command text must be sent as a message, not executed")
+	}
+}
+
 func TestThinkCommandControlsSubsequentRequests(t *testing.T) {
 	var out bytes.Buffer
 	backend := &testBackend{}

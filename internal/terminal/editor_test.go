@@ -40,10 +40,60 @@ func TestMultilineEditAndBracketedPaste(t *testing.T) {
 		t.Fatal("bracketed text paste must not invoke clipboard callback")
 		return chat.Image{}, nil
 	}, nil)
-	requireParts(t, parts, err, Part{Text: "日語本\n二\n三\n四"})
+	pasted := "\n三\n四"
+	requireParts(t, parts, err, Part{Text: "日語本\n二"}, Part{Paste: &pasted})
 	if !strings.Contains(out.String(), "› ") || strings.Contains(out.String(), "You") {
 		t.Fatalf("unexpected prompt: %q", out.String())
 	}
+}
+
+func TestMultilinePasteIsAtomicAndExpandable(t *testing.T) {
+	payload := "中\n\t日本\nEnglish\n"
+	for _, tc := range []struct {
+		name, keys string
+		want       []Part
+		label      bool
+	}{
+		{"kept", "\r", []Part{{Text: "left"}, {Paste: &payload}, {Text: "right"}}, true},
+		{"backspace", "\x7f\r", []Part{{Text: "leftright"}}, false},
+		{"delete", "\x1b[D\x1b[3~\r", []Part{{Text: "leftright"}}, false},
+		{"expand", "\x18\x05!\r", []Part{{Text: "left" + payload + "!right"}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed, out := withKeys(t, strings.Repeat("\x1b[D", 5)+"\x1b[200~"+payload+"\x1b[201~"+tc.keys)
+			parts, err := ed.Read([]Part{{Text: "leftright"}}, nil, nil)
+			requireParts(t, parts, err, tc.want...)
+			if strings.Contains(out.String(), "[Pasted #1 · 3 lines]") != tc.label {
+				t.Fatalf("unexpected paste label: %q", out.String())
+			}
+		})
+	}
+}
+
+func TestPastedStyledTextDropsTerminalEscapes(t *testing.T) {
+	payload := "bold\nlink"
+	ed, _ := withKeys(t, "\x1b[200~\x1b[1mbold\x1b[0m\r\n\x1b]8;;https://example.com\x07link\x1b]8;;\x07\x1b[201~\r")
+	parts, err := ed.Read(nil, nil, nil)
+	requireParts(t, parts, err, Part{Paste: &payload})
+}
+
+func TestLongSingleLinePasteAndImageStaySeparate(t *testing.T) {
+	payload := strings.Repeat("x", 1001)
+	img := chat.Image{Name: "fixture.png"}
+	ed, out := withKeys(t, "\x07\x1b[200~"+payload+"\x1b[201~\r")
+	parts, err := ed.Read(nil, func() (chat.Image, error) { return img, nil }, nil)
+	requireParts(t, parts, err, Part{Image: &img}, Part{Paste: &payload})
+	if !strings.Contains(out.String(), "[Pasted #2 · 1 lines]") || strings.Contains(out.String(), payload) {
+		t.Fatalf("long paste was not collapsed: %q", out.String())
+	}
+}
+
+func TestPasteHistoryRestoresTextWithoutDuplicatingPayload(t *testing.T) {
+	payload := "one\ntwo"
+	ed, _ := withKeys(t, "\x1b[A\r")
+	ed.Remember("past\nmessage")
+	parts, err := ed.Read([]Part{{Paste: &payload}}, nil, nil)
+	requireParts(t, parts, err, Part{Text: "past\nmessage"})
 }
 
 func TestUnicodeBackspaceRemovesGrapheme(t *testing.T) {

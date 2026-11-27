@@ -128,7 +128,7 @@ func layout(lead string, cells []cell, cursor, width int, label func(cell) strin
 			break
 		}
 		c := cells[i]
-		if c.Image == nil {
+		if !c.atomic() {
 			write(c.Text)
 		} else {
 			write(label(c))
