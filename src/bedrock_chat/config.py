@@ -49,6 +49,7 @@ class Settings:
     max_edge: int
     max_bytes: int
     models: dict[str, ModelInfo]
+    model_explicit: bool = False
 
     def resolve_model(self, choice: str) -> str:
         return self.models[choice].id if choice in self.models else validate_model(choice)
@@ -173,4 +174,5 @@ def load_settings(args) -> Settings:
         _integer(images.get("max_edge", 1568), 64, 8000, "images.max_edge"),
         _integer(images.get("max_bytes", 1_500_000), 1024, 3_750_000, "images.max_bytes"),
         models,
+        model_explicit=getattr(args, "model_id", None) is not None,
     )

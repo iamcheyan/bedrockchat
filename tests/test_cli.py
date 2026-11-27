@@ -36,11 +36,72 @@ class FakeBedrock:
         )
 
 
-def make_chat(monkeypatch, tmp_path, *args):
+def start_chat(monkeypatch, tmp_path, *args):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     console = Console(file=StringIO(), width=100, force_terminal=False)
-    return Chat(load_settings(parse_args(["--model", "test.model", *args])), console, FakeBedrock())
+    return Chat(load_settings(parse_args(list(args))), console, FakeBedrock())
+
+
+def make_chat(monkeypatch, tmp_path, *args):
+    return start_chat(monkeypatch, tmp_path, "--model", "test.model", *args)
+
+
+def test_model_selection_survives_restart_without_sending(tmp_path, monkeypatch):
+    config = tmp_path / "settings.toml"
+    config.write_text('[aws]\nmodel_id = "test.default"\n[models.chosen]\nid = "test.chosen"\n')
+    chat = start_chat(monkeypatch, tmp_path, "--config", str(config))
+    assert chat.session.model_id == "test.default"
+    chat.dispatch("/model chosen")
+    chat.dispatch("/model invalid?")
+
+    restarted = start_chat(monkeypatch, tmp_path, "--config", str(config))
+    assert restarted.session.model_id == "test.chosen"
+    assert restarted.session.turns == []
+    assert not chat.service.requests and not restarted.service.requests
+    pref = restarted.settings.history_dir / "last-model"
+    assert pref.stat().st_mode & 0o777 == 0o600
+
+
+def test_explicit_startup_model_overrides_saved_model_and_is_remembered_after_use(
+    tmp_path, monkeypatch
+):
+    start_chat(monkeypatch, tmp_path).dispatch("/model test.saved")
+    chat = start_chat(monkeypatch, tmp_path, "--model", "test.override")
+    assert chat.session.model_id == "test.override"
+    assert start_chat(monkeypatch, tmp_path).session.model_id == "test.saved"
+    chat.dispatch("hello")
+    assert start_chat(monkeypatch, tmp_path).session.model_id == "test.override"
+
+
+def test_no_history_neither_loads_nor_changes_last_model(tmp_path, monkeypatch):
+    start_chat(monkeypatch, tmp_path).dispatch("/model test.saved")
+    chat = start_chat(monkeypatch, tmp_path, "--no-history")
+    assert chat.session.model_id is None
+    chat.dispatch("/model test.private")
+    chat.dispatch("hello")
+    assert start_chat(monkeypatch, tmp_path).session.model_id == "test.saved"
+
+
+def test_resume_keeps_the_sessions_own_model(tmp_path, monkeypatch):
+    chat = start_chat(monkeypatch, tmp_path)
+    chat.dispatch("/model test.older")
+    session_id = chat.session.id
+    chat.dispatch("/new")
+    chat.dispatch("/model test.recent")
+
+    restarted = start_chat(monkeypatch, tmp_path)
+    assert restarted.session.model_id == "test.recent"
+    restarted.dispatch(f"/resume {session_id}")
+    assert restarted.session.model_id == "test.older"
+    assert not restarted.service.requests
+
+
+def test_malformed_last_model_does_not_prevent_startup(tmp_path, monkeypatch):
+    chat = start_chat(monkeypatch, tmp_path)
+    chat.settings.history_dir.mkdir(parents=True)
+    (chat.settings.history_dir / "last-model").write_text("not a model?\n")
+    assert start_chat(monkeypatch, tmp_path).session.model_id is None
 
 
 def test_multimodal_request_explicit_and_history_images_not_resent(tmp_path, monkeypatch):

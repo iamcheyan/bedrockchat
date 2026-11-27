@@ -35,8 +35,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Sequence
 
+from .config import ConfigError, validate_model
+
 STATUS_COMPLETE = "complete"
 _USAGE_KEYS = {"input_tokens", "output_tokens", "total_tokens"}
+_LAST_MODEL = "last-model"
 
 _ID_RE = re.compile(r"[0-9a-f]{32}")
 _PREFIX_RE = re.compile(r"[0-9a-f]{1,32}")
@@ -112,6 +115,30 @@ class HistoryStore:
     def new(self, name: str = "未命名", model_id: str | None = None) -> Session:
         """Create an in-memory session; nothing is written until a save call."""
         return Session(id=uuid.uuid4().hex, name=_valid_name(name), model_id=model_id)
+
+    def load_last_model(self) -> str | None:
+        """Read the local preference without loading any conversation."""
+        if not self.enabled:
+            return None
+        try:
+            with _dir_fd(self._root_path(create=False)) as dir_fd:
+                fd = os.open(
+                    _LAST_MODEL, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd
+                )
+                with os.fdopen(fd, "rb") as handle:
+                    if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                        return None
+                    return validate_model(handle.read(2050).decode("ascii").removesuffix("\n"))
+        except (HistoryError, OSError, UnicodeError, ConfigError):
+            return None
+
+    def save_last_model(self, model_id: str) -> None:
+        """Atomically store only the resolved model ID, using private permissions."""
+        if not self.enabled:
+            return
+        data = (validate_model(model_id) + "\n").encode("ascii")
+        with _dir_fd(self._root_path(create=True)) as dir_fd:
+            _atomic_write_at(dir_fd, _LAST_MODEL, data)
 
     # ----------------------------------------------------------------- writing
 

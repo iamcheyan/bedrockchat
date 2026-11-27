@@ -68,7 +68,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--max-input-tokens", type=int, help="本地估算的输入 Token 预算")
     parser.add_argument("--max-output-tokens", type=int, help="Bedrock 请求的最大输出 Token")
-    parser.add_argument("--no-history", action="store_true", help="不读写持久历史或图片")
+    parser.add_argument("--no-history", action="store_true", help="不读写持久历史、图片或上次模型")
     parser.add_argument("--no-save-images", action="store_true", help="不保存图片字节到本地历史")
     parser.add_argument(
         "--check-clipboard", action="store_true", help="仅测试并显示剪贴板图片尺寸，不联网"
@@ -135,7 +135,8 @@ class Chat:
         self.store = HistoryStore(
             settings.history_dir, enabled=settings.history_enabled, save_images=settings.save_images
         )
-        self.session = self.store.new(model_id=settings.model_id)
+        last_model = None if settings.model_explicit else self.store.load_last_model()
+        self.session = self.store.new(model_id=last_model or settings.model_id)
         self.images: list[ImageAttachment] = []
         self.notice = ""
         self.draft = ""
@@ -274,6 +275,12 @@ class Chat:
                 setattr(self.session, key, value)
             raise
 
+    def _remember_model(self, model_id: str) -> None:
+        try:
+            self.store.save_last_model(model_id)
+        except (HistoryError, OSError):
+            self.say("无法保存下次启动的模型，请检查本地历史目录权限。", style="yellow")
+
     def _switch_session(self, session) -> None:
         self.session = session
         self.images.clear()
@@ -318,8 +325,10 @@ class Chat:
                     vision = {True: "支持图片", False: "仅文本", None: "视觉未标注"}[info.vision]
                     self.say(f"  {alias} · {info.id} · {vision}")
             case "/model", [model]:
-                self._set_session_state(model_id=self.settings.resolve_model(model))
-                self.say(f"已切换：{self.session.model_id}")
+                model_id = self.settings.resolve_model(model)
+                self._set_session_state(model_id=model_id)
+                self._remember_model(model_id)
+                self.say(f"已切换：{model_id}")
             case "/clear", []:
                 self._set_session_state(context_start=len(self.session.turns))
                 self.say("已清空发送上下文；原始历史与累计用量保持不变。")
@@ -409,6 +418,7 @@ class Chat:
             self.say(f"本轮未能写入持久历史：{error}", style="yellow")
         if status == "complete":
             self.images.clear()
+            self._remember_model(model)
         if usage is None:
             self.say("本次 Token：未知（未收到 Bedrock 用量事件；不代表零费用）。", style="dim")
         else:
@@ -508,7 +518,9 @@ def main(argv: list[str] | None = None) -> int:
             raise ConfigError("请在交互式 WSL2 终端运行；可用 --help 查看选项。")
         chat = Chat(settings, console)
         chat.say("TermTuck · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行")
-        if not chat.session.model_id:
+        if chat.session.model_id:
+            chat.say(f"当前模型：{chat.session.model_id}", style="dim")
+        else:
             chat.say("未配置模型；用 /model <ID> 设置，或通过 /resume 恢复已有会话。")
         prompt = create_prompt(chat)
         while True:

@@ -51,7 +51,7 @@ install -d -m 700 "$config_dir"
 install -m 600 config.example.toml "$config_dir/config.toml"
 ```
 
-编辑文件中的 `[aws]`（`profile`、`region`、`model_id`），然后运行 `termtuck`。`[models.<别名>]` 可配置 `id`、`vision`，以及每百万 Token 的 USD 输入、输出价格。`vision = false` 会在本地明确阻止图片；未标注则以 Bedrock 的实际响应为准，不额外请求模型能力信息。运行 `/model` 查看列表，用 `/model <别名或 ID>` 切换；未配置模型也可先用 `/resume` 恢复已有会话。
+编辑文件中的 `[aws]`（`profile`、`region`、`model_id`），然后运行 `termtuck`。`[models.<别名>]` 可配置 `id`、`vision`，以及每百万 Token 的 USD 输入、输出价格。`vision = false` 会在本地明确阻止图片；未标注则以 Bedrock 的实际响应为准，不额外请求模型能力信息。运行 `/model` 查看列表，用 `/model <别名或 ID>` 切换。新启动时的模型优先级是 `--model` → 上次选用的模型 → `[aws].model_id`。通过 `/model` 切换后立即记住，成功完成对话也会更新记录；记录只包含模型 ID，保存在历史目录的 `last-model` 文件中。`/resume` 仍使用会话自己的模型。关闭历史时不读取或保存上次模型。
 
 ## 输入与截图
 
