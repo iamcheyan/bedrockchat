@@ -60,7 +60,7 @@ install -m 600 config.example.toml "$config_dir/config.toml"
 | 发送 | **Enter** |
 | 输入换行 | 先按 **Esc**，再按 **Enter**（也可用传同一序列的 Alt+Enter，取决于终端） |
 | 粘贴 Windows 截图 | **Ctrl+G** |
-| 移除最后一张图片 | **Ctrl+X** 后 **Ctrl+D** |
+| 移除最后一张待发送图片 | 输入框为空时按 **Backspace**；有草稿时可按 **Ctrl+X** 后 **Ctrl+D** |
 | 输入历史 | 方向键、**Ctrl+R**；只在本次程序内保存 |
 | 中断流式回复 | **Ctrl+C**；可能仍会产生 AWS 用量 |
 

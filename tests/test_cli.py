@@ -2,6 +2,7 @@ from importlib.metadata import distribution
 from io import BytesIO, StringIO
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
@@ -173,6 +174,35 @@ def test_keyboard_pastes_only_on_ctrl_g_without_discarding_multiline_draft(tmp_p
         assert prompt.prompt() == "你好\n日本語English"
     assert len(called) == 1 and len(chat.images) == 1
     assert not chat.service.requests
+
+
+@pytest.mark.parametrize("backspace", ["\x7f", "\x08"])
+def test_backspace_removes_last_image_only_when_draft_is_empty(tmp_path, monkeypatch, backspace):
+    chat = make_chat(monkeypatch, tmp_path)
+    from bedrock_chat.images import ImageAttachment
+
+    images = [
+        ImageAttachment(data=b"one", format="png", width=10, height=20, name="one.png"),
+        ImageAttachment(data=b"two", format="png", width=30, height=40, name="two.png"),
+    ]
+    monkeypatch.setattr("bedrock_chat.cli.paste_image", lambda **_: images.pop(0))
+    with create_pipe_input() as pipe:
+        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
+        pipe.send_text(f"\x07\x07{backspace}\r")
+        assert prompt.prompt() == ""
+    assert [image.name for image in chat.images] == ["one.png"]
+
+    with create_pipe_input() as pipe:
+        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
+        pipe.send_text(f"x{backspace}\r")
+        assert prompt.prompt() == ""
+    assert [image.name for image in chat.images] == ["one.png"]
+
+    with create_pipe_input() as pipe:
+        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
+        pipe.send_text(f"{backspace}{backspace}\r")
+        assert prompt.prompt() == ""
+    assert not chat.images and not chat.service.requests
 
 
 def test_bracketed_paste_cannot_trigger_image_read_or_send(tmp_path, monkeypatch):

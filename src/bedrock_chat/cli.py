@@ -12,7 +12,10 @@ from pathlib import Path
 from time import monotonic
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.enums import DEFAULT_BUFFER
+from prompt_toolkit.filters import Condition, has_focus
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -336,6 +339,7 @@ class Chat:
                     self.say(f"{syntax}  {meaning}")
                 self.say(
                     "Enter 发送 · Esc 后按 Enter 换行 · Ctrl+G 粘贴图片 · Ctrl+C 中断 · Ctrl+R 搜索输入历史。\n"
+                    "输入框为空时按 Backspace 移除最后一张待发送图片。\n"
                     "普通文字以斜杠开头时可用 // 转义；多行输入总被当作消息。"
                 )
             case _:
@@ -460,6 +464,11 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
         text = event.data.replace("\r\n", "\n").replace("\r", "\n")
         event.current_buffer.insert_text(terminal_text(text))
 
+    @Condition
+    def can_backspace_image():
+        return bool(chat.images) and not get_app().current_buffer.text
+
+    @keys.add(Keys.Backspace, filter=has_focus(DEFAULT_BUFFER) & can_backspace_image)
     @keys.add("c-x", "c-d")
     def drop_last(event):
         if chat.images:
