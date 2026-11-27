@@ -24,8 +24,17 @@ from rich.live import Live
 from rich.markdown import Markdown
 
 from .bedrock import Bedrock, ChatError, build_request
-from .config import ConfigError, Settings, load_settings, terminal_text
+from .config import (
+    ConfigError,
+    Settings,
+    configured_language,
+    load_settings,
+    read_config,
+    terminal_text,
+    xdg_path,
+)
 from .history import Attachment, HistoryError, HistoryStore, Turn
+from .i18n import DEFAULT_LANGUAGE, LANGUAGES, tr, using_language
 from .images import ImageAttachment, ImageError, paste_image, read_image
 
 MAX_IMAGES = 20
@@ -47,6 +56,7 @@ COMMANDS = {
     "/image reuse <轮次> <序号>": "重新附加当前会话中主动保存过的历史图片",
     "/export [文件.md]": "导出当前会话为 Markdown（不覆盖现有文件）",
     "/config": "查看当前配置（不显示 AWS 凭证或系统提示词）",
+    "/lang [zh|en|ja]": "查看或切换界面语言",
     "/help": "显示本帮助",
     "/exit": "退出",
 }
@@ -55,23 +65,35 @@ COMMAND_NAMES = list(dict.fromkeys(command.split()[0] for command in COMMANDS))
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="termtuck", description="支持图片、本地历史和 Token 预算的 AWS Bedrock 终端聊天"
+        prog="termtuck",
+        description=tr("支持图片、本地历史和 Token 预算的 AWS Bedrock 终端聊天"),
+        add_help=False,
+        allow_abbrev=False,
     )
+    parser._positionals.title = tr("位置参数")
+    parser._optionals.title = tr("选项")
+    parser.add_argument("-h", "--help", action="help", help=tr("显示帮助并退出"))
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {version('bedrock-chat')}"
+        "--version",
+        action="version",
+        version=f"%(prog)s {version('bedrock-chat')}",
+        help=tr("显示版本并退出"),
     )
-    parser.add_argument("--config", type=Path, help="显式读取指定的 TOML 文件")
+    parser.add_argument("--config", type=Path, help=tr("显式读取指定的 TOML 文件"))
+    parser.add_argument("--lang", choices=LANGUAGES, help=tr("界面语言：中文、英语或日语"))
     parser.add_argument("--region", help="AWS Region")
     parser.add_argument("--profile", help="AWS Profile")
     parser.add_argument(
-        "--model", dest="model_id", help="Bedrock 模型 ID、推理配置文件 ID/ARN 或别名"
+        "--model", dest="model_id", help=tr("Bedrock 模型 ID、推理配置文件 ID/ARN 或别名")
     )
-    parser.add_argument("--max-input-tokens", type=int, help="本地估算的输入 Token 预算")
-    parser.add_argument("--max-output-tokens", type=int, help="Bedrock 请求的最大输出 Token")
-    parser.add_argument("--no-history", action="store_true", help="不读写持久历史、图片或上次模型")
-    parser.add_argument("--no-save-images", action="store_true", help="不保存图片字节到本地历史")
+    parser.add_argument("--max-input-tokens", type=int, help=tr("本地估算的输入 Token 预算"))
+    parser.add_argument("--max-output-tokens", type=int, help=tr("Bedrock 请求的最大输出 Token"))
+    parser.add_argument("--no-history", action="store_true", help=tr("不读写历史、图片或本地偏好"))
     parser.add_argument(
-        "--check-clipboard", action="store_true", help="仅测试并显示剪贴板图片尺寸，不联网"
+        "--no-save-images", action="store_true", help=tr("不保存图片字节到本地历史")
+    )
+    parser.add_argument(
+        "--check-clipboard", action="store_true", help=tr("仅测试并显示剪贴板图片尺寸，不联网")
     )
     return parser.parse_args(argv)
 
@@ -82,7 +104,7 @@ def describe_image(image: ImageAttachment) -> str:
 
 def _positive(value: str) -> int:
     if not value.isascii() or not value.isdecimal() or len(value) > 9 or int(value) < 1:
-        raise ValueError("请输入正整数序号。")
+        raise ValueError(tr("请输入正整数序号。"))
     return int(value)
 
 
@@ -136,7 +158,10 @@ class Chat:
             settings.history_dir, enabled=settings.history_enabled, save_images=settings.save_images
         )
         last_model = None if settings.model_explicit else self.store.load_last_model()
-        self.session = self.store.new(model_id=last_model or settings.model_id)
+        saved_language = None if settings.language_explicit else self.store.load_language()
+        self.language = saved_language or settings.language
+        with using_language(self.language):
+            self.session = self.store.new(tr("未命名"), model_id=last_model or settings.model_id)
         self.images: list[ImageAttachment] = []
         self.notice = ""
         self.draft = ""
@@ -145,14 +170,20 @@ class Chat:
         self.console.print(terminal_text(message), markup=False, highlight=False, style=style)
 
     def toolbar(self) -> str:
+        with using_language(self.language):
+            return self._toolbar()
+
+    def _toolbar(self) -> str:
         details = "  ".join(
             f"#{i} {describe_image(image)}" for i, image in enumerate(self.images, 1)
         )
-        message = f"图片 {len(self.images)} 张" + (f"  {details}" if details else "")
+        message = tr("图片 {count} 张", count=len(self.images)) + (
+            f"  {details}" if details else ""
+        )
         if self.notice:
             message += f"  │  {self.notice}"
         elif not details:
-            message += "  │  Ctrl+G 粘贴截图 · Esc+Enter 换行 · Enter 发送"
+            message += "  │  " + tr("Ctrl+G 粘贴截图 · Esc+Enter 换行 · Enter 发送")
         return terminal_text(message).replace("\n", " ").replace("\t", " ")
 
     def _check_attach(self) -> None:
@@ -160,15 +191,17 @@ class Chat:
             self.session.model_id
             and self.settings.model_info(self.session.model_id).vision is False
         ):
-            raise ImageError("当前模型不支持图片，请用 /model 切换到视觉模型。")
+            raise ImageError(tr("当前模型不支持图片，请用 /model 切换到视觉模型。"))
         if len(self.images) >= MAX_IMAGES:
-            raise ImageError(f"最多附加 {MAX_IMAGES} 张图片。")
+            raise ImageError(tr("最多附加 {count} 张图片。", count=MAX_IMAGES))
 
     def _add_image(self, image: ImageAttachment) -> None:
         if sum(len(item.data) for item in self.images) + len(image.data) > MAX_IMAGE_BODY:
-            raise ImageError("图片合计超过 15 MB，请移除部分图片或减少其尺寸。")
+            raise ImageError(tr("图片合计超过 15 MB，请移除部分图片或减少其尺寸。"))
         self.images.append(image)
-        self.notice = f"已附加 #{len(self.images)}（{describe_image(image)}）"
+        self.notice = tr(
+            "已附加 #{count}（{image}）", count=len(self.images), image=describe_image(image)
+        )
 
     def _image_options(self) -> dict[str, int]:
         return {"max_edge": self.settings.max_edge, "max_bytes": self.settings.max_bytes}
@@ -189,7 +222,7 @@ class Chat:
             else:
                 index = _positive(args[1]) if len(args) == 2 else len(self.images)
                 if not 1 <= index <= len(self.images):
-                    raise ImageError("没有这个待发送图片序号。")
+                    raise ImageError(tr("没有这个待发送图片序号。"))
                 self.images.pop(index - 1)
             self.say(self.toolbar())
         elif args[0] == "reuse" and len(args) == 3:
@@ -202,7 +235,9 @@ class Chat:
             self._add_image(read_image(Path(args[0]).expanduser(), **self._image_options()))
             self.say(self.notice)
         else:
-            raise ValueError("用法：/image <路径> | paste | drop [序号|all] | reuse <轮次> <序号>")
+            raise ValueError(
+                tr("用法：/image <路径> | paste | drop [序号|all] | reuse <轮次> <序号>")
+            )
 
     def _tokens(self) -> None:
         input_tokens = output_tokens = total = unknown = unpriced = 0
@@ -224,31 +259,41 @@ class Chat:
             else:
                 cost += estimate
                 priced = True
-        message = (
-            f"会话累计（已知）Token：输入 {input_tokens} / 输出 {output_tokens} / 总计 {total}"
+        message = tr(
+            "会话累计（已知）Token：输入 {input} / 输出 {output} / 总计 {total}",
+            input=input_tokens,
+            output=output_tokens,
+            total=total,
         )
         if unknown:
-            message += f"；{unknown} 次用量未知"
+            message += tr("；{count} 次用量未知", count=unknown)
         if priced:
-            message += f"；已定价部分预估 US${cost:.8f}"
+            message += tr("；已定价部分预估 US${cost:.8f}", cost=cost)
             if unpriced:
-                message += f"（{unpriced} 次未定价）"
+                message += tr("（{count} 次未定价）", count=unpriced)
         self.say(message, style="dim")
 
     def _show(self, limit: int) -> None:
         if not self.session.turns:
-            self.say("本会话还没有对话。")
+            self.say(tr("本会话还没有对话。"))
         for number, turn in enumerate(self.session.turns, 1):
             if number <= len(self.session.turns) - limit:
                 continue
             self.say(
                 f"#{number} · {turn.timestamp} · {turn.model_id} · {turn.status}", style="cyan"
             )
-            self.say(turn.user or "（仅图片）")
+            self.say(turn.user or tr("（仅图片）"))
             for i, image in enumerate(turn.attachments, 1):
                 self.say(
-                    f"  图片 #{i}：{image.name} · {image.width}×{image.height}"
-                    + (" · 已保存" if image.file else " · 未保存")
+                    tr(
+                        "  图片 #{index}：{name} · {width}×{height}",
+                        index=i,
+                        name=image.name,
+                        width=image.width,
+                        height=image.height,
+                    )
+                    + " · "
+                    + tr("已保存" if image.file else "未保存")
                 )
             if turn.assistant:
                 self.console.print(_markdown(turn.assistant))
@@ -256,13 +301,30 @@ class Chat:
     def _config(self) -> None:
         s = self.settings
         self.say(
-            f"Region：{s.region or '由 boto3 解析'}；Profile：{s.profile or 'boto3 默认凭证链'}\n"
-            f"模型：{self.session.model_id or '未设置'}；输入预算（估算）：{s.max_input_tokens}；"
-            f"输出上限：{s.max_output_tokens}\n"
-            f"历史：{'开启' if s.history_enabled else '关闭'}；"
-            f"图片保存：{'开启' if s.save_images else '关闭'}；"
-            f"图片长边/字节上限：{s.max_edge} px / {s.max_bytes} B"
+            tr(
+                "Region：{region}；Profile：{profile}",
+                region=s.region or tr("由 boto3 解析"),
+                profile=s.profile or tr("boto3 默认凭证链"),
+            )
         )
+        self.say(
+            tr(
+                "模型：{model}；输入预算（估算）：{input}；输出上限：{output}",
+                model=self.session.model_id or tr("未设置"),
+                input=s.max_input_tokens,
+                output=s.max_output_tokens,
+            )
+        )
+        self.say(
+            tr(
+                "历史：{history}；图片保存：{images}；图片长边/字节上限：{edge} px / {size} B",
+                history=tr("开启" if s.history_enabled else "关闭"),
+                images=tr("开启" if s.save_images else "关闭"),
+                edge=s.max_edge,
+                size=s.max_bytes,
+            )
+        )
+        self.say(tr("界面语言：{language}", language=LANGUAGES[self.language]))
 
     def _set_session_state(self, **values) -> None:
         previous = {key: getattr(self.session, key) for key in values}
@@ -279,20 +341,20 @@ class Chat:
         try:
             self.store.save_last_model(model_id)
         except (HistoryError, OSError):
-            self.say("无法保存下次启动的模型，请检查本地历史目录权限。", style="yellow")
+            self.say(tr("无法保存下次启动的模型，请检查本地历史目录权限。"), style="yellow")
 
     def _switch_session(self, session) -> None:
         self.session = session
         self.images.clear()
         self.draft = ""
-        self.say(f"会话：{session.id[:12]} · {session.name}；/show 查看记录。")
+        self.say(tr("会话：{id} · {name}；/show 查看记录。", id=session.id[:12], name=session.name))
 
     def _local(self, command: str, args: list[str]) -> bool:
         match command, args:
             case "/exit", []:
                 return False
             case "/new", names:
-                new = self.store.new(" ".join(names) or "未命名", self.session.model_id)
+                new = self.store.new(" ".join(names) or tr("未命名"), self.session.model_id)
                 self.store.save_state(new)
                 self._switch_session(new)
             case "/history" | "/search", words:
@@ -301,7 +363,7 @@ class Chat:
                     mark = "*" if session.id == self.session.id else " "
                     self.say(f"{mark} {session.id[:12]} · {session.name}")
                 if not sessions:
-                    self.say("没有匹配的本地会话。")
+                    self.say(tr("没有匹配的本地会话。"))
             case "/resume" | "/switch", [ident]:
                 self._switch_session(self.store.load(ident))
             case "/show", []:
@@ -312,26 +374,28 @@ class Chat:
                 renamed = self.store.rename(ident, " ".join([name, *rest]))
                 if self.session.id == renamed.id:
                     self.session.name = renamed.name
-                self.say(f"已重命名：{renamed.name}")
+                self.say(tr("已重命名：{name}", name=renamed.name))
             case "/delete", [ident]:
                 target = self.store.load(ident)
                 self.store.delete(target.id)
                 if self.session.id == target.id:
-                    self._switch_session(self.store.new(model_id=self.session.model_id))
-                self.say(f"已删除：{target.id[:12]}")
+                    self._switch_session(
+                        self.store.new(tr("未命名"), model_id=self.session.model_id)
+                    )
+                self.say(tr("已删除：{id}", id=target.id[:12]))
             case "/model", []:
-                self.say(f"当前模型：{self.session.model_id or '未设置'}")
+                self.say(tr("当前模型：{model}", model=self.session.model_id or tr("未设置")))
                 for alias, info in self.settings.models.items():
                     vision = {True: "支持图片", False: "仅文本", None: "视觉未标注"}[info.vision]
-                    self.say(f"  {alias} · {info.id} · {vision}")
+                    self.say(f"  {alias} · {info.id} · {tr(vision)}")
             case "/model", [model]:
                 model_id = self.settings.resolve_model(model)
                 self._set_session_state(model_id=model_id)
                 self._remember_model(model_id)
-                self.say(f"已切换：{model_id}")
+                self.say(tr("已切换：{model}", model=model_id))
             case "/clear", []:
                 self._set_session_state(context_start=len(self.session.turns))
-                self.say("已清空发送上下文；原始历史与累计用量保持不变。")
+                self.say(tr("已清空发送上下文；原始历史与累计用量保持不变。"))
             case "/tokens", []:
                 self._tokens()
             case "/image", options:
@@ -340,27 +404,42 @@ class Chat:
                 path = Path(
                     args[0] if args else f"bedrock-chat-{self.session.id[:12]}.md"
                 ).expanduser()
-                self.say(f"已导出：{self.store.export(self.session, path)}")
+                self.say(tr("已导出：{path}", path=self.store.export(self.session, path)))
             case "/config", []:
                 self._config()
+            case "/lang", []:
+                self.say(tr("界面语言：{language}", language=LANGUAGES[self.language]))
+                for code, name in LANGUAGES.items():
+                    self.say(f"  /lang {code} · {name}")
+            case "/lang", [language] if language.lower() in LANGUAGES:
+                self.language = language.lower()
+                with using_language(self.language):
+                    try:
+                        self.store.save_language(self.language)
+                    except (HistoryError, OSError):
+                        self.say(tr("无法保存界面语言，下次启动时可能不会记住。"), style="yellow")
+                    self.say(tr("界面语言已切换为：{language}", language=LANGUAGES[self.language]))
+            case "/lang", _:
+                self.say(tr("用法：/lang [zh|en|ja]"), style="yellow")
             case "/help", []:
                 for syntax, meaning in COMMANDS.items():
-                    self.say(f"{syntax}  {meaning}")
-                self.say(
-                    "Enter 发送 · Esc 后按 Enter 换行 · Ctrl+G 粘贴图片 · Ctrl+C 中断 · Ctrl+R 搜索输入历史。\n"
-                    "输入框为空时按 Backspace 移除最后一张待发送图片。\n"
-                    "普通文字以斜杠开头时可用 // 转义；多行输入总被当作消息。"
-                )
+                    self.say(f"{tr(syntax)}  {tr(meaning)}")
+                for hint in (
+                    "Enter 发送 · Esc 后按 Enter 换行 · Ctrl+G 粘贴图片 · Ctrl+C 中断 · Ctrl+R 搜索输入历史。",
+                    "输入框为空时按 Backspace 移除最后一张待发送图片。",
+                    "普通文字以斜杠开头时可用 // 转义；多行输入总被当作消息。",
+                ):
+                    self.say(tr(hint))
             case _:
-                raise ValueError("未知命令或参数不正确。用 /help 查看。")
+                raise ValueError(tr("未知命令或参数不正确。用 /help 查看。"))
         return True
 
     def _send(self, text: str) -> None:
         model = self.session.model_id
         if not model:
-            raise ChatError("请先用 /model <ID> 设置模型，或在启动时提供 --model。")
+            raise ChatError(tr("请先用 /model <ID> 设置模型，或在启动时提供 --model。"))
         if self.images and self.settings.model_info(model).vision is False:
-            raise ImageError("当前模型不支持图片；请切换模型，或先 /image drop all。")
+            raise ImageError(tr("当前模型不支持图片；请切换模型，或先 /image drop all。"))
         s = self.settings
         previous = [
             (turn.user, turn.assistant)
@@ -377,9 +456,13 @@ class Chat:
             system_prompt=s.system_prompt,
         )
         self.say(
-            f"发送中 · 输入估算 {budget.estimated_tokens} Token"
-            + (f" · 略去 {budget.dropped_turns} 个最早轮次" if budget.dropped_turns else "")
-            + " · Ctrl+C 中断",
+            tr("发送中 · 输入估算 {tokens} Token", tokens=budget.estimated_tokens)
+            + (
+                tr(" · 略去 {turns} 个最早轮次", turns=budget.dropped_turns)
+                if budget.dropped_turns
+                else ""
+            )
+            + tr(" · Ctrl+C 中断"),
             style="dim",
         )
         preview = Preview(self.console)
@@ -397,7 +480,7 @@ class Chat:
         if result.error:
             self.say(result.error, style="yellow")
         elif result.stop_reason not in ("end_turn", "stop_sequence"):
-            self.say(f"停止原因：{result.stop_reason}", style="dim")
+            self.say(tr("停止原因：{reason}", reason=result.stop_reason), style="dim")
         usage = asdict(result.usage) if result.usage is not None else None
         turn = Turn(
             model,
@@ -415,31 +498,43 @@ class Chat:
         except HistoryError as error:
             if not any(saved is turn for saved in self.session.turns):
                 self.session.turns.append(turn)
-            self.say(f"本轮未能写入持久历史：{error}", style="yellow")
+            self.say(tr("本轮未能写入持久历史：{error}", error=error), style="yellow")
         if status == "complete":
             self.images.clear()
             self._remember_model(model)
         if usage is None:
-            self.say("本次 Token：未知（未收到 Bedrock 用量事件；不代表零费用）。", style="dim")
+            self.say(tr("本次 Token：未知（未收到 Bedrock 用量事件；不代表零费用）。"), style="dim")
         else:
             estimate = s.model_info(model).cost(
                 result.usage.input_tokens, result.usage.output_tokens
             )
-            suffix = f"；预估 US${estimate:.8f}" if estimate is not None else ""
+            suffix = tr("；预估 US${cost:.8f}", cost=estimate) if estimate is not None else ""
             self.say(
-                f"本次 Token：输入 {result.usage.input_tokens} / 输出 {result.usage.output_tokens}"
-                f" / 总计 {result.usage.total_tokens}{suffix}",
+                tr(
+                    "本次 Token：输入 {input} / 输出 {output} / 总计 {total}",
+                    input=result.usage.input_tokens,
+                    output=result.usage.output_tokens,
+                    total=result.usage.total_tokens,
+                )
+                + suffix,
                 style="dim",
             )
         self._tokens()
 
     def dispatch(self, text: str) -> bool:
+        with using_language(self.language):
+            return self._dispatch(text)
+
+    def _dispatch(self, text: str) -> bool:
         self.notice = ""
         self.draft = ""
         is_command = text.startswith("/") and not text.startswith("//") and "\n" not in text
         try:
             if is_command:
-                command, *args = shlex.split(text)
+                try:
+                    command, *args = shlex.split(text)
+                except ValueError:
+                    raise ValueError(tr("命令参数的引号或转义不完整。")) from None
                 return self._local(command.lower(), args)
             if text.strip() or self.images:
                 self._send(text[1:] if text.startswith("//") else text)
@@ -463,10 +558,11 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
 
     @keys.add("c-g")
     def attach(event):
-        try:
-            chat.paste()
-        except (ImageError, KeyboardInterrupt) as error:
-            chat.notice = str(error) or "已取消图片粘贴。"
+        with using_language(chat.language):
+            try:
+                chat.paste()
+            except (ImageError, KeyboardInterrupt) as error:
+                chat.notice = str(error) or tr("已取消图片粘贴。")
         event.app.invalidate()
 
     @keys.add(Keys.BracketedPaste)
@@ -483,11 +579,16 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
     def drop_last(event):
         if chat.images:
             chat.images.pop()
-            chat.notice = "已移除最后一张图片。"
+            with using_language(chat.language):
+                chat.notice = tr("已移除最后一张图片。")
         event.app.invalidate()
 
+    def label():
+        with using_language(chat.language):
+            return tr("你 › ")
+
     return PromptSession(
-        "你 › ",
+        label,
         multiline=True,
         prompt_continuation="  … ",
         key_bindings=keys,
@@ -501,27 +602,77 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
     )
 
 
+def _startup_config(argv: list[str]) -> tuple[str, dict, ConfigError | None]:
+    # Read only the options needed to localize --help and startup diagnostics.
+    bootstrap = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
+    bootstrap.add_argument("--config", type=Path)
+    bootstrap.add_argument("--lang")
+    bootstrap.add_argument("--no-history", action="store_true")
+    try:
+        options, _ = bootstrap.parse_known_args(argv)
+    except argparse.ArgumentError:
+        return DEFAULT_LANGUAGE, {}, None  # The full parser reports invalid arguments.
+
+    saved = None
+    raw = {}
+    explicit = options.lang if options.lang in LANGUAGES else None
+    try:
+        with using_language(explicit or DEFAULT_LANGUAGE):
+            raw = read_config(options)
+        history = raw.get("history", {})
+        if not explicit and not options.no_history and isinstance(history, dict):
+            store = HistoryStore(
+                xdg_path("XDG_STATE_HOME", ".local/state"),
+                enabled=history.get("enabled", True) is True,
+            )
+            saved = store.load_language()
+        language = explicit or saved or configured_language(raw)
+    except ConfigError as error:
+        return explicit or saved or DEFAULT_LANGUAGE, raw, error
+    return language, raw, None
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+    arguments = sys.argv[1:] if argv is None else argv
+    language, raw, config_error = _startup_config(arguments)
+    with using_language(language):
+        args = parse_args(arguments)
+        if config_error is not None:
+            _startup_error(config_error)
+            return 1
+        return _run(args, raw)
+
+
+def _startup_error(error: Exception) -> None:
+    Console(stderr=True).print(
+        terminal_text(str(error)), markup=False, highlight=False, style="red"
+    )
+
+
+def _run(args: argparse.Namespace, raw: dict) -> int:
     console = Console()
     try:
-        settings = load_settings(args)
+        settings = load_settings(args, raw=raw)
         if args.check_clipboard:
             image = paste_image(max_edge=settings.max_edge, max_bytes=settings.max_bytes)
             console.print(
-                f"剪贴板：{describe_image(image)} · {image.format}；未联网、未保存。",
+                tr(
+                    "剪贴板：{size} · {format}；未联网、未保存。",
+                    size=describe_image(image),
+                    format=image.format,
+                ),
                 markup=False,
                 highlight=False,
             )
             return 0
         if not sys.stdin.isatty() or not sys.stdout.isatty():
-            raise ConfigError("请在交互式 WSL2 终端运行；可用 --help 查看选项。")
+            raise ConfigError(tr("请在交互式 WSL2 终端运行；可用 --help 查看选项。"))
         chat = Chat(settings, console)
-        chat.say("TermTuck · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行")
+        chat.say(tr("TermTuck · /help 查看命令 · Ctrl+G 粘贴截图 · Esc+Enter 换行"))
         if chat.session.model_id:
-            chat.say(f"当前模型：{chat.session.model_id}", style="dim")
+            chat.say(tr("当前模型：{model}", model=chat.session.model_id), style="dim")
         else:
-            chat.say("未配置模型；用 /model <ID> 设置，或通过 /resume 恢复已有会话。")
+            chat.say(tr("未配置模型；用 /model <ID> 设置，或通过 /resume 恢复已有会话。"))
         prompt = create_prompt(chat)
         while True:
             try:
@@ -530,13 +681,12 @@ def main(argv: list[str] | None = None) -> int:
                     return 0
             except KeyboardInterrupt:
                 chat.draft = ""
-                chat.say("已取消当前操作；/exit 退出。")
+                with using_language(chat.language):
+                    chat.say(tr("已取消当前操作；/exit 退出。"))
             except EOFError:
                 return 0
     except (ConfigError, HistoryError, ImageError, OSError) as error:
-        Console(stderr=True).print(
-            terminal_text(str(error)), markup=False, highlight=False, style="red"
-        )
+        _startup_error(error)
         return 1
     except KeyboardInterrupt:
         return 130

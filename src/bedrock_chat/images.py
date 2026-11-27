@@ -15,6 +15,8 @@ from time import monotonic
 
 from PIL import Image, ImageOps
 
+from .i18n import tr
+
 _DEFAULT_MAX_BYTES = 1_500_000
 _BEDROCK_MAX_BYTES = 3_750_000
 _BEDROCK_MAX_EDGE = 8000
@@ -101,9 +103,11 @@ class ImageAttachment:
 
 def _check_limits(max_edge: int, max_bytes: int) -> None:
     if type(max_edge) is not int or not 1 <= max_edge <= _BEDROCK_MAX_EDGE:
-        raise ImageError(f"图片边长限制必须为 1～{_BEDROCK_MAX_EDGE} 像素。")
+        raise ImageError(tr("图片边长限制必须为 1～{max_edge} 像素。", max_edge=_BEDROCK_MAX_EDGE))
     if type(max_bytes) is not int or not 1 <= max_bytes <= _BEDROCK_MAX_BYTES:
-        raise ImageError(f"图片大小限制必须为 1～{_BEDROCK_MAX_BYTES} 字节。")
+        raise ImageError(
+            tr("图片大小限制必须为 1～{max_bytes} 字节。", max_bytes=_BEDROCK_MAX_BYTES)
+        )
 
 
 def _decode_image(data: bytes, formats: tuple[str, ...]) -> tuple[Image.Image, str]:
@@ -111,9 +115,9 @@ def _decode_image(data: bytes, formats: tuple[str, ...]) -> tuple[Image.Image, s
         with BytesIO(data) as buffer:
             with Image.open(buffer, formats=formats) as source:
                 if not (0 < source.width * source.height <= _MAX_INPUT_PIXELS):
-                    raise ImageError("原始图片的像素数超出限制。")
+                    raise ImageError(tr("原始图片的像素数超出限制。"))
                 if getattr(source, "n_frames", 1) != 1:
-                    raise ImageError("不支持多帧图片。")
+                    raise ImageError(tr("不支持多帧图片。"))
                 image_format = source.format
                 source.verify()
             # verify() invalidates the decoder; reopen to load the pixels.
@@ -124,9 +128,9 @@ def _decode_image(data: bytes, formats: tuple[str, ...]) -> tuple[Image.Image, s
                 image.info.clear()
             return image, "png" if image_format == "PNG" else "jpeg"
     except (Image.DecompressionBombError, Image.DecompressionBombWarning):
-        raise ImageError("原始图片的像素数超出限制。") from None
+        raise ImageError(tr("原始图片的像素数超出限制。")) from None
     except (OSError, SyntaxError, ValueError, TypeError, IndexError, OverflowError, StructError):
-        raise ImageError("图片无法解码，请使用有效的 PNG 或 JPEG 图片。") from None
+        raise ImageError(tr("图片无法解码，请使用有效的 PNG 或 JPEG 图片。")) from None
 
 
 def _fit_image(image: Image.Image, format: str, max_edge: int, max_bytes: int) -> bytes:
@@ -143,10 +147,10 @@ def _fit_image(image: Image.Image, format: str, max_edge: int, max_bytes: int) -
                 if size <= max_bytes:
                     return output.getvalue()
         except (OSError, ValueError):
-            raise ImageError("无法编码图片。") from None
+            raise ImageError(tr("无法编码图片。")) from None
         edge = max(image.size)
         if edge == 1:
-            raise ImageError("图片无法缩小到指定的字节限制。")
+            raise ImageError(tr("图片无法缩小到指定的字节限制。"))
         # Bytes roughly follow pixel count. Make measured reductions instead of
         # dropping to a fixed small thumbnail; compression may change after resizing.
         next_edge = max(1, int(edge * max(0.5, min(0.95, sqrt(max_bytes / size)))))
@@ -171,14 +175,14 @@ def read_image(
         with open(path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) as f:
             info = os.fstat(f.fileno())
             if not stat.S_ISREG(info.st_mode):
-                raise ImageError("图片路径必须指向普通文件。")
+                raise ImageError(tr("图片路径必须指向普通文件。"))
             if info.st_size > _MAX_INPUT_BYTES:
-                raise ImageError("原始图片文件太大。")
+                raise ImageError(tr("原始图片文件太大。"))
             data = f.read(_MAX_INPUT_BYTES + 1)
     except (OSError, ValueError):
-        raise ImageError("无法读取图片文件。") from None
+        raise ImageError(tr("无法读取图片文件。")) from None
     if len(data) > _MAX_INPUT_BYTES:
-        raise ImageError("原始图片文件太大。")
+        raise ImageError(tr("原始图片文件太大。"))
 
     image, format = _decode_image(data, ("PNG", "JPEG"))
     with image:
@@ -212,21 +216,21 @@ def _read_clipboard() -> bytes:
                             break
                         data.extend(chunk)
                         if len(data) > _MAX_INPUT_BYTES:
-                            raise ImageError("剪贴板图片太大。")
+                            raise ImageError(tr("剪贴板图片太大。"))
                 status = process.wait(timeout=max(0, deadline - monotonic()))
             finally:
                 if process.poll() is None:
                     process.kill()
     except (TimeoutError, subprocess.TimeoutExpired):
-        raise ImageError("读取 Windows 剪贴板超时，请重试。") from None
+        raise ImageError(tr("读取 Windows 剪贴板超时，请重试。")) from None
     except OSError:
-        raise ImageError("无法启动 Windows PowerShell，请检查 WSL 互操作是否可用。") from None
+        raise ImageError(tr("无法启动 Windows PowerShell，请检查 WSL 互操作是否可用。")) from None
     if status == 12:
-        raise ImageError("剪贴板图片太大。")
+        raise ImageError(tr("剪贴板图片太大。"))
     if status == 10 or (status == 0 and not data):
-        raise ImageError("Windows 剪贴板中没有图片。")
+        raise ImageError(tr("Windows 剪贴板中没有图片。"))
     if status != 0:
-        raise ImageError("无法读取剪贴板，请重试。")
+        raise ImageError(tr("无法读取剪贴板，请重试。"))
     return bytes(data)
 
 

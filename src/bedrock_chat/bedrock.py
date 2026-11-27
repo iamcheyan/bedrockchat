@@ -12,6 +12,7 @@ from botocore.session import get_session
 from urllib3.exceptions import HTTPError, TimeoutError
 
 from .config import ConfigError, validate_model
+from .i18n import tr
 
 
 class ChatError(Exception):
@@ -50,7 +51,7 @@ def _text_tokens(text: str) -> int:
 
 def _check_model(model_id: str) -> None:
     if not isinstance(model_id, str):
-        raise ChatError("请指定有效的 Bedrock 模型 ID 或推理配置文件 ID/ARN。")
+        raise ChatError(tr("请指定有效的 Bedrock 模型 ID 或推理配置文件 ID/ARN。"))
     try:
         validate_model(model_id)
     except ConfigError as exc:
@@ -81,10 +82,10 @@ def build_request(
     """
     _check_model(model_id)
     if any(type(limit) is not int or limit < 1 for limit in (max_input_tokens, max_output_tokens)):
-        raise ChatError("输入与输出 Token 上限必须是正整数。")
+        raise ChatError(tr("输入与输出 Token 上限必须是正整数。"))
     has_text = bool(text.strip())
     if not has_text and not images:
-        raise ChatError("请输入消息或添加图片。")
+        raise ChatError(tr("请输入消息或添加图片。"))
 
     current_cost = 3 + 8 + (_text_tokens(text) if has_text else 0)
     if system_prompt:
@@ -92,17 +93,21 @@ def build_request(
     content = []
     for payload, width, height in images:
         if type(width) is not int or type(height) is not int or min(width, height) < 1:
-            raise ChatError("图片尺寸必须是正整数。")
+            raise ChatError(tr("图片尺寸必须是正整数。"))
         if not _is_inline_image(payload):
-            raise ChatError("图片必须是有效的 Bedrock 内联字节格式。")
+            raise ChatError(tr("图片必须是有效的 Bedrock 内联字节格式。"))
         current_cost += (width * height + 749) // 750
         content.append({"image": payload})
     if has_text:
         content.append({"text": text})
     if current_cost > max_input_tokens:
         raise ChatError(
-            f"当前消息（含图片和系统提示词）超出输入 Token 预算："
-            f"估算 {current_cost}，上限 {max_input_tokens}。"
+            tr(
+                "当前消息（含图片和系统提示词）超出输入 Token 预算："
+                "估算 {current_cost}，上限 {max_input_tokens}。",
+                current_cost=current_cost,
+                max_input_tokens=max_input_tokens,
+            )
         )
 
     # Work backward so we only estimate the history we might actually send.
@@ -110,7 +115,7 @@ def build_request(
     dropped = len(previous)
     for user, assistant in reversed(previous):
         if not all(isinstance(value, str) and value.strip() for value in (user, assistant)):
-            raise ChatError("历史轮次必须包含用户消息和助手回复的文本。")
+            raise ChatError(tr("历史轮次必须包含用户消息和助手回复的文本。"))
         cost = 16 + _text_tokens(user) + _text_tokens(assistant)
         if total + cost > max_input_tokens:
             break
@@ -147,11 +152,11 @@ def _check_request(request: dict) -> bool:
     """Guard the chat-only boundary even if send() is called without the builder."""
     _check_model(request.get("modelId"))
     if request.keys() - {"modelId", "messages", "system", "inferenceConfig"}:
-        raise ChatError("不支持工具调用、扩展思考或其他额外的请求字段。")
+        raise ChatError(tr("不支持工具调用、扩展思考或其他额外的请求字段。"))
     has_images = False
     for entry in request.get("system", ()):
         if entry.keys() != {"text"}:
-            raise ChatError("系统提示词仅支持文本。")
+            raise ChatError(tr("系统提示词仅支持文本。"))
     messages = request.get("messages", ())
     for index, message in enumerate(messages):
         for block in message["content"]:
@@ -165,7 +170,7 @@ def _check_request(request: dict) -> bool:
             ):
                 has_images = True
                 continue
-            raise ChatError("消息仅支持文本，且只能在当前用户消息中附加内联图片。")
+            raise ChatError(tr("消息仅支持文本，且只能在当前用户消息中附加内联图片。"))
     return has_images
 
 
@@ -205,10 +210,12 @@ def _service_error(code: str, has_images: bool) -> str:
     if code and code[:1].islower():
         code = _STREAM_CODES.get(code, code)
     if code == "ValidationException":
-        message = "Bedrock 未通过请求校验，请检查模型 ID、区域和输入参数。"
         if has_images:
-            message += "请确认该模型支持视觉（图片）输入，且图片符合模型限制。"
-        return message
+            return tr(
+                "Bedrock 未通过请求校验，请检查模型 ID、区域和输入参数。"
+                "请确认该模型支持视觉（图片）输入，且图片符合模型限制。"
+            )
+        return tr("Bedrock 未通过请求校验，请检查模型 ID、区域和输入参数。")
     if code in {
         "ExpiredToken",
         "ExpiredTokenException",
@@ -216,29 +223,29 @@ def _service_error(code: str, has_images: bool) -> str:
         "InvalidSignatureException",
         "UnrecognizedClientException",
     }:
-        return _REAUTH
-    return _SERVICE_ERRORS.get(code, _UNKNOWN_ERROR)
+        return tr(_REAUTH)
+    return tr(_SERVICE_ERRORS.get(code, _UNKNOWN_ERROR))
 
 
 def _safe_error(exc: Exception, has_images: bool) -> str:
     if isinstance(exc, aws.ClientError):  # Includes botocore's EventStreamError.
         code = exc.response.get("Error", {}).get("Code")
-        return _service_error(code, has_images) if isinstance(code, str) else _UNKNOWN_ERROR
+        return _service_error(code, has_images) if isinstance(code, str) else tr(_UNKNOWN_ERROR)
     if isinstance(exc, aws.ProfileNotFound):
-        return "找不到 AWS 配置文件，请检查 profile 名称。"
+        return tr("找不到 AWS 配置文件，请检查 profile 名称。")
     if isinstance(exc, aws.NoRegionError):
-        return "未指定 AWS 区域，请设置 --region、AWS_REGION 或 AWS_DEFAULT_REGION。"
+        return tr("未指定 AWS 区域，请设置 --region、AWS_REGION 或 AWS_DEFAULT_REGION。")
     if isinstance(exc, (aws.SSOError, aws.TokenRetrievalError, aws.CredentialRetrievalError)):
-        return _REAUTH
+        return tr(_REAUTH)
     if isinstance(exc, (aws.NoCredentialsError, aws.PartialCredentialsError)):
-        return "缺少可用的 AWS 凭证，请检查凭证配置；若使用 SSO，请先运行 aws sso login。"
+        return tr("缺少可用的 AWS 凭证，请检查凭证配置；若使用 SSO，请先运行 aws sso login。")
     if isinstance(exc, (aws.ConnectTimeoutError, aws.ReadTimeoutError, TimeoutError)):
-        return "连接 Bedrock 或读取回复超时，请检查网络后再试。"
+        return tr("连接 Bedrock 或读取回复超时，请检查网络后再试。")
     if isinstance(exc, (aws.ConnectionError, aws.HTTPClientError, HTTPError, OSError)):
-        return "Bedrock 网络连接失败，请检查网络和 AWS 区域。"
+        return tr("Bedrock 网络连接失败，请检查网络和 AWS 区域。")
     if isinstance(exc, aws.ParamValidationError):
         return _service_error("ValidationException", has_images)
-    return _UNKNOWN_ERROR
+    return tr(_UNKNOWN_ERROR)
 
 
 def _read_usage(metadata: dict) -> Usage | None:
@@ -326,11 +333,11 @@ class Bedrock:
                     break
             if error is None:
                 if stop == "error":
-                    error = _INCOMPLETE
-                else:
-                    error = _STOP_ERRORS.get(stop)
+                    error = tr(_INCOMPLETE)
+                elif message := _STOP_ERRORS.get(stop):
+                    error = tr(message)
         except KeyboardInterrupt:
-            stop, error = "interrupted", "已中断。"
+            stop, error = "interrupted", tr("已中断。")
         except Exception as exc:
             stop, error = "error", _safe_error(exc, has_images)
         finally:
@@ -338,7 +345,7 @@ class Bedrock:
                 try:
                     stream.close()
                 except KeyboardInterrupt:
-                    stop, error = "interrupted", "已中断。"
+                    stop, error = "interrupted", tr("已中断。")
                 except Exception:
                     # Best-effort cleanup must not mask the stream's outcome.
                     pass

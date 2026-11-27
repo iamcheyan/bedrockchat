@@ -10,6 +10,9 @@ max_input_tokens = 6000   # 本地估算预算，非 Bedrock 精确 Token 限制
 max_output_tokens = 1024 # 请求的 inferenceConfig.maxTokens
 system_prompt = ""       # 留空时不发送 system 字段
 
+[ui]
+language = "zh"          # 界面语言：zh（简体中文）、en（英语）、ja（日语）；不影响模型回复
+
 [history]
 enabled = true
 save_images = false      # false: 只保存附件名、尺寸、格式、字节数，不保存像素

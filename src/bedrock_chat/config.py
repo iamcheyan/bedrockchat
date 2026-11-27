@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
+from .i18n import LANGUAGES, tr
+
 
 class ConfigError(ValueError):
     pass
@@ -50,6 +52,8 @@ class Settings:
     max_bytes: int
     models: dict[str, ModelInfo]
     model_explicit: bool = False
+    language: str = "zh"
+    language_explicit: bool = False
 
     def resolve_model(self, choice: str) -> str:
         return self.models[choice].id if choice in self.models else validate_model(choice)
@@ -62,15 +66,23 @@ class Settings:
 
 def validate_model(value: str) -> str:
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.:_/-]{0,2047}", value):
-        raise ConfigError("模型 ID 或 ARN 格式无效。")
+        raise ConfigError(tr("模型 ID 或 ARN 格式无效。"))
     if re.search(r":prompt(?:-version)?/", value):
-        raise ConfigError("不支持 Prompt Management ARN；请使用模型 ID 或推理配置文件 ID/ARN。")
+        raise ConfigError(tr("不支持 Prompt Management ARN；请使用模型 ID 或推理配置文件 ID/ARN。"))
+    return value
+
+
+def validate_language(value: object) -> str:
+    if not isinstance(value, str) or value not in LANGUAGES:
+        raise ConfigError(tr("界面语言必须是 zh、en 或 ja。"))
     return value
 
 
 def _table(value: object, allowed: set[str] | None, label: str) -> dict:
     if not isinstance(value, dict) or (allowed is not None and (value.keys() - allowed)):
-        raise ConfigError(f"{label} 配置格式有误或含有未知字段。不要在配置中填写凭证。")
+        raise ConfigError(
+            tr("{label} 配置格式有误或含有未知字段。不要在配置中填写凭证。", label=label)
+        )
     return value
 
 
@@ -78,32 +90,35 @@ def _string(value: object, label: str, *, optional: bool = False) -> str | None:
     if value is None and optional:
         return None
     if not isinstance(value, str) or "\x00" in value or (optional and not value.strip()):
-        raise ConfigError(f"{label} 必须是有效的字符串。")
+        raise ConfigError(tr("{label} 必须是有效的字符串。", label=label))
     return value
 
 
 def _boolean(value: object, label: str) -> bool:
     if type(value) is not bool:
-        raise ConfigError(f"{label} 必须是 true 或 false。")
+        raise ConfigError(tr("{label} 必须是 true 或 false。", label=label))
     return value
 
 
 def _integer(value: object, low: int, high: int, label: str) -> int:
     if type(value) is not int or not low <= value <= high:
-        raise ConfigError(f"{label} 必须是 {low}～{high} 内的整数。")
+        raise ConfigError(
+            tr("{label} 必须是 {low}～{high} 内的整数。", label=label, low=low, high=high)
+        )
     return value
 
 
 def _price(value: object) -> Decimal:
     if type(value) not in (int, float, Decimal):
-        raise ConfigError("模型价格必须是非负数字。")
+        raise ConfigError(tr("模型价格必须是非负数字。"))
     number = Decimal(str(value))
     if not number.is_finite() or not 0 <= number <= 1_000_000:
-        raise ConfigError("模型价格必须是 0～1000000 内的有限数字。")
+        raise ConfigError(tr("模型价格必须是 0～1000000 内的有限数字。"))
     return number
 
 
-def load_settings(args) -> Settings:
+def read_config(args) -> dict:
+    """Read TOML from the selected path without validating the settings schema."""
     explicit_path = getattr(args, "config", None)
     path = (
         Path(explicit_path).expanduser()
@@ -112,14 +127,29 @@ def load_settings(args) -> Settings:
     )
     try:
         with path.open("rb") as file:
-            raw = tomllib.load(file, parse_float=Decimal)
+            return tomllib.load(file, parse_float=Decimal)
     except FileNotFoundError:
         if explicit_path:
-            raise ConfigError("找不到指定的配置文件。") from None
-        raw = {}
+            raise ConfigError(tr("找不到指定的配置文件。")) from None
+        return {}
     except (OSError, UnicodeError, ValueError):
-        raise ConfigError("无法读取配置文件，请检查文件权限与 TOML 语法。") from None
-    _table(raw, {"aws", "chat", "history", "images", "models"}, "顶层")
+        raise ConfigError(tr("无法读取配置文件，请检查文件权限与 TOML 语法。")) from None
+
+
+def configured_language(raw: dict) -> str:
+    """Validate the optional UI table independently of the rest of the settings."""
+    ui = _table(raw.get("ui", {}), {"language"}, "[ui]")
+    return validate_language(ui.get("language", "zh"))
+
+
+def load_settings(args, *, raw: dict | None = None) -> Settings:
+    if raw is None:
+        raw = read_config(args)
+    _table(raw, {"aws", "chat", "history", "images", "models", "ui"}, tr("顶层"))
+    language = configured_language(raw)
+    explicit_language = getattr(args, "lang", None)
+    if explicit_language is not None:
+        language = validate_language(explicit_language)
     aws = _table(raw.get("aws", {}), {"region", "profile", "model_id"}, "[aws]")
     chat = _table(
         raw.get("chat", {}), {"max_input_tokens", "max_output_tokens", "system_prompt"}, "[chat]"
@@ -130,16 +160,16 @@ def load_settings(args) -> Settings:
     seen_ids = set()
     for alias, item in _table(raw.get("models", {}), None, "[models]").items():
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,63}", alias):
-            raise ConfigError("模型别名必须为 1～64 个英文字母、数字、点、下划线或连字符。")
-        _table(item, {"id", "vision", "input_per_million", "output_per_million"}, "模型")
-        model_id = validate_model(_string(item.get("id"), "模型 ID"))
+            raise ConfigError(tr("模型别名必须为 1～64 个英文字母、数字、点、下划线或连字符。"))
+        _table(item, {"id", "vision", "input_per_million", "output_per_million"}, tr("模型"))
+        model_id = validate_model(_string(item.get("id"), tr("模型 ID")))
         if model_id in seen_ids:
-            raise ConfigError("不同模型别名不能使用同一个模型 ID。")
+            raise ConfigError(tr("不同模型别名不能使用同一个模型 ID。"))
         seen_ids.add(model_id)
         vision = _boolean(item["vision"], "vision") if "vision" in item else None
         has_input, has_output = "input_per_million" in item, "output_per_million" in item
         if has_input != has_output:
-            raise ConfigError("输入与输出价格需同时填写。")
+            raise ConfigError(tr("输入与输出价格需同时填写。"))
         models[alias] = ModelInfo(
             model_id,
             vision,
@@ -155,7 +185,7 @@ def load_settings(args) -> Settings:
     model_id = models[choice].id if choice in models else validate_model(choice) if choice else None
     region = _string(override("region", aws), "region", optional=True)
     if region is not None and not re.fullmatch(r"[a-z]{2}(?:-[a-z0-9]+)+-\d+", region):
-        raise ConfigError("AWS Region 格式无效。")
+        raise ConfigError(tr("AWS Region 格式无效。"))
     profile = _string(override("profile", aws), "profile", optional=True)
     enabled = _boolean(history.get("enabled", True), "history.enabled")
     save_images = _boolean(history.get("save_images", False), "history.save_images")
@@ -175,4 +205,6 @@ def load_settings(args) -> Settings:
         _integer(images.get("max_bytes", 1_500_000), 1024, 3_750_000, "images.max_bytes"),
         models,
         model_explicit=getattr(args, "model_id", None) is not None,
+        language=language,
+        language_explicit=explicit_language is not None,
     )

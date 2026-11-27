@@ -1,5 +1,7 @@
 # TermTuck
 
+简体中文 · [English](README.en.md) · [日本語](README.ja.md)
+
 **能发图、能接着聊，又不必把整段历史重发给模型的终端 AI 聊天工具。**
 
 TermTuck（Terminal + Tuck）面向 Windows Terminal + WSL2，使用 AWS Bedrock 流式回复，支持 Markdown、代码高亮和中日英多行对话。
@@ -27,6 +29,16 @@ termtuck --help
 ```
 
 工具没有发布到 PyPI，请从仓库或其构建的 wheel 安装。旧命令 `bedrock-chat` 继续可用，配置与历史文件无需迁移。
+
+## 界面语言
+
+启动时任选一种：`termtuck --lang zh`（简体中文）、`termtuck --lang en`（英语）或 `termtuck --lang ja`（日语）。
+
+`/lang` 是**聊天内命令**，不是 `termtuck /lang` 这样的 shell 命令。进入聊天后，输入 `/lang` 查看当前语言和可选语言；输入 `/lang zh`、`/lang en` 或 `/lang ja` 立即切换并在本地保存。重新打开 TermTuck 时，若未指定 `--lang`，则使用上次保存的界面语言。
+
+启动时的优先级：`--lang` → 上次在聊天内选定并保存的语言 → TOML 的 `[ui]` 下的 `language`（[示例](config.example.toml)为 `language = "zh"`）→ 简体中文。`--no-history` 不读取或写入上次选定的界面语言，但仍可用参数或配置指定语言，也可在聊天中切换（仅在当前进程内生效）。
+
+此设置只影响 TermTuck 的界面，不会改变发送给模型的提示词，也不控制模型回复的语言。
 
 ## AWS CLI 认证与模型
 
@@ -84,6 +96,7 @@ Windows Terminal 的普通粘贴（例如 **Ctrl+Shift+V**）继续用于文字�
 | `/show [轮数]` | 查看当前会话最近的历史（默认 5 轮） |
 | `/rename <ID> <名称>` / `/delete <ID>` | 本地重命名 / 永久删除该会话和已保存的图片 |
 | `/model [别名或 ID]` | 查询或切换模型 |
+| `/lang [zh\|en\|ja]` | 查看当前界面语言和选项，或切换界面语言 |
 | `/clear` | 只清空后续请求上下文，保留本地历史和累计用量 |
 | `/tokens` | 查看已知的累计用量及配置价格后的费用估算 |
 | `/image <路径>` / `/image list` / `/image drop [序号\|all]` | 附加、查看和移除待发送附件 |
