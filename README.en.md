@@ -58,6 +58,8 @@ language = "zh"
 - In chat, use `/image "./sample shot.png"` to attach a PNG or JPEG. Use `/image list` to review queued images, `/image drop 1` to remove the first one, and `/image drop all` to clear the queue. Choose a model that accepts image input.
 - On Windows, capture a nonsensitive screenshot with **Win+Shift+S**. In the WSL2 chat press **Ctrl+G** or enter `/image paste`. This explicitly reads an image using Windows PowerShell over WSL interop; ordinary terminal paste is for text. If it fails, check `command -v powershell.exe` in WSL or attach a file instead.
 
+Each attachment appears inline as `[Image #1]`, `[Image #2]`, and so on. You can continue editing around a marker. Press **Backspace** just after it or **Delete** just before it to remove the entire attachment. Only the remaining images are sent; the markers themselves are not sent as text or saved in input history.
+
 Attachments are sent only when you send a message. The message, attached images, and any retained context text go to Bedrock. Local chat history is not encrypted, and image bytes are not saved to history by default. Use `/history` to list saved chats and `/resume <ID>` to reopen one.
 
 ## Validation limits

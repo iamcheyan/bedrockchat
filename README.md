@@ -72,13 +72,14 @@ install -m 600 config.example.toml "$config_dir/config.toml"
 | 发送 | **Enter** |
 | 输入换行 | 先按 **Esc**，再按 **Enter**（也可用传同一序列的 Alt+Enter，取决于终端） |
 | 粘贴 Windows 截图 | **Ctrl+G** |
-| 移除最后一张待发送图片 | 输入框为空时按 **Backspace**；有草稿时可按 **Ctrl+X** 后 **Ctrl+D** |
+| 移除待发送图片 | 在图片占位符后按 **Backspace**，或在其前按 **Delete**；也可按 **Ctrl+X** 后 **Ctrl+D** 移除最后一张 |
 | 输入历史 | 方向键、**Ctrl+R**；只在本次程序内保存 |
 | 中断流式回复 | **Ctrl+C**；可能仍会产生 AWS 用量 |
 
 1. Windows 中按 **Win+Shift+S** 选取截图，确保截图已进入剪贴板。
-2. 回到 WSL 聊天输入框按 **Ctrl+G**。无需清空已输入文字，底部栏会显示图片数量、每张的尺寸和大小。截另一张再按一次，可发送多张图片。
-3. 输入说明后按 **Enter** 一起发送。也可只发送图片。发错附件前用 `/image drop 1` 移除第一张，或用 `/image drop all` 清空。
+2. 回到 WSL 聊天输入框按 **Ctrl+G**，光标处会出现 `[图片 #1]`。可以继续编辑占位符前后的文字，或在其他位置再粘贴一张。底栏仍显示图片尺寸和大小。
+3. 用左右方向键跨过占位符，按 **Backspace** 或 **Delete** 可以整块删掉对应图片，不影响其他文字或图片。也可用 `/image drop 1` 或 `/image drop all`。
+4. 按 **Enter** 发送剩余的图片和文字；占位符不会作为文字发给模型，也不会保存在输入历史中。可以只发送图片。
 
 Windows Terminal 的普通粘贴（例如 **Ctrl+Shift+V**）继续用于文字；它通常不会把图片像素传给 WSL。**Ctrl+G** 专门触发图片读取；若被自定义 Windows Terminal 快捷键拦截，可免联网运行 `termtuck --check-clipboard` 排查，也可在聊天内输入 `/image paste`。程序通过 WSL interop 启动 Windows PowerShell 读取图片格式，不轮询剪贴板、不读剪贴板文本、不写临时截图文件。
 

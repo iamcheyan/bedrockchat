@@ -12,11 +12,11 @@ from pathlib import Path
 from time import monotonic
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.application.current import get_app
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.document import Document
 from prompt_toolkit.enums import DEFAULT_BUFFER
-from prompt_toolkit.filters import Condition, has_focus
-from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.filters import has_focus
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from rich.console import Console
@@ -24,6 +24,7 @@ from rich.live import Live
 from rich.markdown import Markdown
 
 from .bedrock import Bedrock, ChatError, build_request
+from .composer import MARK_END, MARK_START, ImageChips, TextHistory, markers, plain_text
 from .config import (
     ConfigError,
     Settings,
@@ -162,9 +163,14 @@ class Chat:
         self.language = saved_language or settings.language
         with using_language(self.language):
             self.session = self.store.new(tr("未命名"), model_id=last_model or settings.model_id)
-        self.images: list[ImageAttachment] = []
+        self.attachments: dict[str, ImageAttachment] = {}
+        self._next_marker = MARK_START
         self.notice = ""
         self.draft = ""
+
+    @property
+    def images(self) -> list[ImageAttachment]:
+        return list(self.attachments.values())
 
     def say(self, message: str, *, style: str | None = None) -> None:
         self.console.print(terminal_text(message), markup=False, highlight=False, style=style)
@@ -195,44 +201,62 @@ class Chat:
         if len(self.images) >= MAX_IMAGES:
             raise ImageError(tr("最多附加 {count} 张图片。", count=MAX_IMAGES))
 
-    def _add_image(self, image: ImageAttachment) -> None:
+    def _add_image(self, image: ImageAttachment) -> str:
         if sum(len(item.data) for item in self.images) + len(image.data) > MAX_IMAGE_BODY:
             raise ImageError(tr("图片合计超过 15 MB，请移除部分图片或减少其尺寸。"))
-        self.images.append(image)
+        if self._next_marker > MARK_END:
+            raise ImageError(tr("本次运行的图片标记已用完，请重启 TermTuck。"))
+        marker = chr(self._next_marker)
+        self._next_marker += 1
+        self.attachments[marker] = image
         self.notice = tr(
-            "已附加 #{count}（{image}）", count=len(self.images), image=describe_image(image)
+            "已附加 #{count}（{image}）", count=len(self.attachments), image=describe_image(image)
         )
+        return marker
+
+    def sync_attachments(self, text: str) -> None:
+        # Keep only live markers, in input order. Deleted images cannot be
+        # silently restored by undo or history recall.
+        active = {key: self.attachments[key] for key in markers(text) if key in self.attachments}
+        self.attachments.clear()
+        self.attachments.update(active)
 
     def _image_options(self) -> dict[str, int]:
         return {"max_edge": self.settings.max_edge, "max_bytes": self.settings.max_bytes}
 
-    def paste(self) -> None:
+    def paste(self) -> str:
         self._check_attach()
-        self._add_image(paste_image(**self._image_options()))
+        return self._add_image(paste_image(**self._image_options()))
 
     def _image(self, args: list[str]) -> None:
         if not args or args == ["list"]:
             self.say(self.toolbar())
         elif args == ["paste"]:
-            self.paste()
+            self.draft += self.paste()
             self.say(self.notice)
         elif args[0] == "drop" and len(args) <= 2:
             if args[1:] == ["all"]:
-                self.images.clear()
+                self.attachments.clear()
+                self.draft = ""
             else:
-                index = _positive(args[1]) if len(args) == 2 else len(self.images)
-                if not 1 <= index <= len(self.images):
+                keys = list(self.attachments)
+                index = _positive(args[1]) if len(args) == 2 else len(keys)
+                if not 1 <= index <= len(keys):
                     raise ImageError(tr("没有这个待发送图片序号。"))
-                self.images.pop(index - 1)
+                marker = keys[index - 1]
+                del self.attachments[marker]
+                self.draft = self.draft.replace(marker, "")
             self.say(self.toolbar())
         elif args[0] == "reuse" and len(args) == 3:
             self._check_attach()
             path = self.store.attachment_path(self.session, _positive(args[1]), _positive(args[2]))
-            self._add_image(read_image(path, **self._image_options()))
+            self.draft += self._add_image(read_image(path, **self._image_options()))
             self.say(self.notice)
         elif len(args) == 1:
             self._check_attach()
-            self._add_image(read_image(Path(args[0]).expanduser(), **self._image_options()))
+            self.draft += self._add_image(
+                read_image(Path(args[0]).expanduser(), **self._image_options())
+            )
             self.say(self.notice)
         else:
             raise ValueError(
@@ -345,7 +369,7 @@ class Chat:
 
     def _switch_session(self, session) -> None:
         self.session = session
-        self.images.clear()
+        self.attachments.clear()
         self.draft = ""
         self.say(tr("会话：{id} · {name}；/show 查看记录。", id=session.id[:12], name=session.name))
 
@@ -426,7 +450,7 @@ class Chat:
                     self.say(f"{tr(syntax)}  {tr(meaning)}")
                 for hint in (
                     "Enter 发送 · Esc 后按 Enter 换行 · Ctrl+G 粘贴图片 · Ctrl+C 中断 · Ctrl+R 搜索输入历史。",
-                    "输入框为空时按 Backspace 移除最后一张待发送图片。",
+                    "光标在图片标记后按 Backspace，或在标记前按 Delete，可移除该图片。",
                     "普通文字以斜杠开头时可用 // 转义；多行输入总被当作消息。",
                 ):
                     self.say(tr(hint))
@@ -500,8 +524,9 @@ class Chat:
                 self.session.turns.append(turn)
             self.say(tr("本轮未能写入持久历史：{error}", error=error), style="yellow")
         if status == "complete":
-            self.images.clear()
+            self.attachments.clear()
             self._remember_model(model)
+        self.draft = "".join(self.attachments)
         if usage is None:
             self.say(tr("本次 Token：未知（未收到 Bedrock 用量事件；不代表零费用）。"), style="dim")
         else:
@@ -527,7 +552,9 @@ class Chat:
 
     def _dispatch(self, text: str) -> bool:
         self.notice = ""
-        self.draft = ""
+        self.draft = "".join(self.attachments)
+        rendered_draft = text if markers(text) else self.draft + text
+        text = plain_text(text)
         is_command = text.startswith("/") and not text.startswith("//") and "\n" not in text
         try:
             if is_command:
@@ -537,10 +564,9 @@ class Chat:
                     raise ValueError(tr("命令参数的引号或转义不完整。")) from None
                 return self._local(command.lower(), args)
             if text.strip() or self.images:
+                self.draft = rendered_draft
                 self._send(text[1:] if text.startswith("//") else text)
         except (ChatError, ImageError, HistoryError, ValueError) as error:
-            if not is_command:
-                self.draft = text
             self.say(str(error), style="yellow")
         return True
 
@@ -556,11 +582,12 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
     def newline(event):
         event.current_buffer.insert_text("\n")
 
-    @keys.add("c-g")
+    @keys.add("c-g", filter=has_focus(DEFAULT_BUFFER))
     def attach(event):
         with using_language(chat.language):
             try:
-                chat.paste()
+                marker = chat.paste()
+                event.current_buffer.insert_text(marker)
             except (ImageError, KeyboardInterrupt) as error:
                 chat.notice = str(error) or tr("已取消图片粘贴。")
         event.app.invalidate()
@@ -568,17 +595,16 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
     @keys.add(Keys.BracketedPaste)
     def text_paste(event):
         text = event.data.replace("\r\n", "\n").replace("\r", "\n")
-        event.current_buffer.insert_text(terminal_text(text))
+        event.current_buffer.insert_text(plain_text(terminal_text(text)))
 
-    @Condition
-    def can_backspace_image():
-        return bool(chat.images) and not get_app().current_buffer.text
-
-    @keys.add(Keys.Backspace, filter=has_focus(DEFAULT_BUFFER) & can_backspace_image)
-    @keys.add("c-x", "c-d")
+    @keys.add("c-x", "c-d", filter=has_focus(DEFAULT_BUFFER))
     def drop_last(event):
-        if chat.images:
-            chat.images.pop()
+        if chat.attachments:
+            marker = next(reversed(chat.attachments))
+            buffer = event.current_buffer
+            before = buffer.document.text_before_cursor.replace(marker, "")
+            after = buffer.document.text_after_cursor.replace(marker, "")
+            buffer.document = Document(before + after, len(before))
             with using_language(chat.language):
                 chat.notice = tr("已移除最后一张图片。")
         event.app.invalidate()
@@ -587,12 +613,32 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
         with using_language(chat.language):
             return tr("你 › ")
 
-    return PromptSession(
+    def chip_label(index: int) -> str:
+        with using_language(chat.language):
+            return tr("[图片 #{number}]", number=index)
+
+    def sync_draft(buffer: Buffer) -> None:
+        count = len(chat.attachments)
+        chat.sync_attachments(buffer.text)
+        if len(chat.attachments) < count:
+            chat.notice = ""
+        # Undo may restore the buffer character, but not the discarded image.
+        stale = [mark for mark in markers(buffer.text) if mark not in chat.attachments]
+        if stale:
+            before = buffer.document.text_before_cursor
+            after = buffer.document.text_after_cursor
+            for mark in stale:
+                before = before.replace(mark, "")
+                after = after.replace(mark, "")
+            buffer.document = Document(before + after, len(before))
+
+    prompt = PromptSession(
         label,
         multiline=True,
         prompt_continuation="  … ",
         key_bindings=keys,
-        history=InMemoryHistory(),
+        history=TextHistory(),
+        input_processors=[ImageChips(chat.attachments, chip_label)],
         completer=WordCompleter(COMMAND_NAMES, sentence=True),
         bottom_toolbar=chat.toolbar,
         complete_while_typing=False,
@@ -600,6 +646,8 @@ def create_prompt(chat: Chat, **kwargs) -> PromptSession:
         enable_open_in_editor=False,
         **kwargs,
     )
+    prompt.default_buffer.on_text_changed += sync_draft
+    return prompt
 
 
 def _startup_config(argv: list[str]) -> tuple[str, dict, ConfigError | None]:
@@ -680,7 +728,7 @@ def _run(args: argparse.Namespace, raw: dict) -> int:
                 if not chat.dispatch(text):
                     return 0
             except KeyboardInterrupt:
-                chat.draft = ""
+                chat.draft = "".join(chat.attachments)
                 with using_language(chat.language):
                     chat.say(tr("已取消当前操作；/exit 退出。"))
             except EOFError:

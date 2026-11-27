@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from PIL import Image
+from prompt_toolkit.document import Document
 from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from rich.console import Console
@@ -11,6 +12,7 @@ from rich.console import Console
 from bedrock_chat.bedrock import Usage
 from bedrock_chat.cli import Chat, create_prompt, main, parse_args
 from bedrock_chat.config import load_settings
+from bedrock_chat.images import ImageAttachment
 
 
 def test_termtuck_and_legacy_commands_share_entry_point():
@@ -222,8 +224,6 @@ def test_keyboard_pastes_only_on_ctrl_g_without_discarding_multiline_draft(tmp_p
 
     def paste(**kwargs):
         called.append(kwargs)
-        from bedrock_chat.images import ImageAttachment
-
         return ImageAttachment(
             data=png.getvalue(), format="png", width=100, height=100, name="clip"
         )
@@ -232,16 +232,43 @@ def test_keyboard_pastes_only_on_ctrl_g_without_discarding_multiline_draft(tmp_p
     with create_pipe_input() as pipe:
         prompt = create_prompt(chat, input=pipe, output=DummyOutput())
         pipe.send_text("你好\x1b\r日本語\x07English\r")
-        assert prompt.prompt() == "你好\n日本語English"
-    assert len(called) == 1 and len(chat.images) == 1
-    assert not chat.service.requests
+        chat.dispatch(prompt.prompt())
+    assert chat.service.requests[0]["messages"][-1]["content"][-1] == {
+        "text": "你好\n日本語English"
+    }
+    assert chat.session.turns[-1].user == "你好\n日本語English"
+    assert len(called) == 1
+    assert not chat.images
+
+
+@pytest.mark.parametrize("key", ["\x7f", "\x08", "\x1b[D\x1b[3~"])
+def test_inline_image_can_be_removed_in_mixed_draft(tmp_path, monkeypatch, key):
+    chat = make_chat(monkeypatch, tmp_path)
+    attachments = iter(
+        [
+            ImageAttachment(b"first image", "png", 16, 12, "first.png"),
+            ImageAttachment(b"second image", "png", 20, 17, "second.png"),
+        ]
+    )
+    monkeypatch.setattr("bedrock_chat.cli.paste_image", lambda **_: next(attachments))
+    with create_pipe_input() as pipe:
+        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
+        pipe.send_text(f"你好\x07 middle \x07{key}finished\r")
+        chat.dispatch(prompt.prompt())
+    blocks = chat.service.requests[0]["messages"][-1]["content"]
+    assert [block["image"]["source"]["bytes"] for block in blocks if "image" in block] == [
+        b"first image"
+    ]
+    assert blocks[-1] == {"text": "你好 middle finished"}
+    assert [i.name for i in chat.session.turns[0].attachments] == ["first.png"]
+    assert prompt.history.get_strings() == ["你好 middle finished"]
 
 
 @pytest.mark.parametrize("backspace", ["\x7f", "\x08"])
-def test_backspace_removes_last_image_only_when_draft_is_empty(tmp_path, monkeypatch, backspace):
+def test_backspace_removes_one_image_at_a_time_from_image_only_draft(
+    tmp_path, monkeypatch, backspace
+):
     chat = make_chat(monkeypatch, tmp_path)
-    from bedrock_chat.images import ImageAttachment
-
     images = [
         ImageAttachment(data=b"one", format="png", width=10, height=20, name="one.png"),
         ImageAttachment(data=b"two", format="png", width=30, height=40, name="two.png"),
@@ -249,21 +276,56 @@ def test_backspace_removes_last_image_only_when_draft_is_empty(tmp_path, monkeyp
     monkeypatch.setattr("bedrock_chat.cli.paste_image", lambda **_: images.pop(0))
     with create_pipe_input() as pipe:
         prompt = create_prompt(chat, input=pipe, output=DummyOutput())
-        pipe.send_text(f"\x07\x07{backspace}\r")
-        assert prompt.prompt() == ""
-    assert [image.name for image in chat.images] == ["one.png"]
-
-    with create_pipe_input() as pipe:
-        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
-        pipe.send_text(f"x{backspace}\r")
-        assert prompt.prompt() == ""
+        pipe.send_text(f"\x07\x07{backspace}x{backspace}\r")
+        draft = prompt.prompt()
+    assert len(draft) == 1
     assert [image.name for image in chat.images] == ["one.png"]
 
     with create_pipe_input() as pipe:
         prompt = create_prompt(chat, input=pipe, output=DummyOutput())
         pipe.send_text(f"{backspace}{backspace}\r")
-        assert prompt.prompt() == ""
+        chat.dispatch(prompt.prompt(default=Document(draft, len(draft))))
     assert not chat.images and not chat.service.requests
+
+
+def test_paste_at_cursor_preserves_text_on_both_sides(tmp_path, monkeypatch):
+    chat = make_chat(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "bedrock_chat.cli.paste_image", lambda **_: ImageAttachment(b"image", "png", 10, 10, "clip")
+    )
+    with create_pipe_input() as pipe:
+        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
+        pipe.send_text("左尾\x1b[D\x07右\r")
+        chat.dispatch(prompt.prompt())
+    blocks = chat.service.requests[0]["messages"][-1]["content"]
+    assert blocks[-1] == {"text": "左右尾"}
+    assert blocks[0]["image"]["source"]["bytes"] == b"image"
+
+
+def test_image_commands_keep_remaining_chips_in_next_prompt(tmp_path, monkeypatch):
+    chat = make_chat(monkeypatch, tmp_path)
+    for name in ("one.png", "two.png"):
+        path = tmp_path / name
+        Image.new("RGB", (10, 10)).save(path)
+        chat.dispatch(f"/image {path}")
+    with create_pipe_input() as pipe:
+        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
+        pipe.send_text("/image drop 1\r")
+        chat.dispatch(prompt.prompt(default=chat.draft))
+        assert [image.name for image in chat.images] == ["two.png"]
+        assert not chat.service.requests
+        pipe.send_text("\x7f\r")
+        chat.dispatch(prompt.prompt(default=chat.draft))
+    assert not chat.images and not chat.service.requests
+
+
+def test_literal_image_label_is_sent_as_text(tmp_path, monkeypatch):
+    chat = make_chat(monkeypatch, tmp_path)
+    with create_pipe_input() as pipe:
+        prompt = create_prompt(chat, input=pipe, output=DummyOutput())
+        pipe.send_text("[图片 #1]\r")
+        chat.dispatch(prompt.prompt())
+    assert chat.service.requests[0]["messages"][-1]["content"] == [{"text": "[图片 #1]"}]
 
 
 def test_bracketed_paste_cannot_trigger_image_read_or_send(tmp_path, monkeypatch):

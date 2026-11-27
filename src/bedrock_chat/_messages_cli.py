@@ -1,6 +1,11 @@
 """English and Japanese text for the terminal interface."""
 
 MESSAGES = {
+    "[图片 #{number}]": ("[Image #{number}]", "[画像 #{number}]"),
+    "本次运行的图片标记已用完，请重启 TermTuck。": (
+        "No more attachment markers are available. Restart TermTuck.",
+        "画像のマーカーを使い切りました。TermTuck を再起動してください。",
+    ),
     "/new [名称]": ("/new [name]", "/new [名前]"),
     "/history [关键词]": ("/history [keyword]", "/history [キーワード]"),
     "/show [轮数]": ("/show [turns]", "/show [ターン数]"),
@@ -214,9 +219,9 @@ MESSAGES = {
         "Enter sends · Esc then Enter inserts a newline · Ctrl+G pastes an image · Ctrl+C interrupts · Ctrl+R searches input history.",
         "Enter 送信 · Esc の後に Enter で改行 · Ctrl+G 画像を貼り付け · Ctrl+C 中断 · Ctrl+R 入力履歴を検索。",
     ),
-    "输入框为空时按 Backspace 移除最后一张待发送图片。": (
-        "On an empty draft, Backspace removes the last attached image.",
-        "入力欄が空のときは Backspace で最後の添付画像を削除できます。",
+    "光标在图片标记后按 Backspace，或在标记前按 Delete，可移除该图片。": (
+        "Press Backspace after an image marker or Delete before it to remove the image.",
+        "画像マーカーの直後で Backspace、直前で Delete を押すと画像を削除できます。",
     ),
     "普通文字以斜杠开头时可用 // 转义；多行输入总被当作消息。": (
         "Use // to send text starting with a slash. Multiline input is always sent as a message.",
