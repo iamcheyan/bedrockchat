@@ -125,14 +125,15 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	a.session = h.New(a.tr("未命名", "Untitled", "無題"), model)
 	if f, ok := out.(*os.File); ok && term.IsTerminal(int(f.Fd())) && os.Getenv("TERM") != "dumb" && os.Getenv("NO_COLOR") == "" {
 		a.color = true
-		width, _, _ := term.GetSize(int(f.Fd()))
-		if width < 30 {
+		a.replyWidth = func() int {
+			width, _, _ := term.GetSize(int(f.Fd()))
+			return width
+		}
+		width := a.replyWidth()
+		if width <= 0 {
 			width = 80
 		}
-		if width > 100 {
-			width = 100
-		}
-		a.markdown, _ = glamour.NewTermRenderer(glamour.WithStylePath("dark"), glamour.WithWordWrap(width))
+		a.markdown, _ = glamour.NewTermRenderer(glamour.WithStylePath("dark"), glamour.WithWordWrap(min(width, 100)))
 	}
 	a.editor.ImageLabel = func(_ chat.Image) string { return a.tr("[图片]", "[Image]", "[画像]") }
 	a.line("bedrockchat · /help")
@@ -166,6 +167,7 @@ type app struct {
 	editor         *terminal.Editor
 	draft          []terminal.Part
 	markdown       *glamour.TermRenderer
+	replyWidth     func() int
 	color          bool
 }
 
@@ -211,7 +213,7 @@ func (a *app) showModel() {
 func (a *app) renderReply(s string) {
 	if a.markdown != nil {
 		if rendered, err := a.markdown.Render(clean(s)); err == nil {
-			fmt.Fprint(a.out, rendered)
+			fmt.Fprint(a.out, safeMarkdownOutput(rendered))
 			return
 		}
 	}
@@ -289,18 +291,22 @@ func (a *app) dispatch(parts []terminal.Part) bool {
 	a.line(fmt.Sprintf(a.tr("预计输入 %d Token · 略去 %d 轮 · Ctrl+C 中断", "Estimated input: %d tokens · %d turns omitted · Ctrl+C to cancel", "入力推定 %d トークン · %d ターン省略 · Ctrl+C で中断"), estimated, dropped))
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	var streamed bool
-	result := a.backend.Send(ctx, req, func(s string) { streamed = true; fmt.Fprint(a.out, clean(s)) })
+	preview := replyPreview{out: a.out, width: a.replyWidth}
+	result := a.backend.Send(ctx, req, func(s string) {
+		if a.markdown != nil {
+			preview.feed(s)
+			return
+		}
+		streamed = true
+		fmt.Fprint(a.out, clean(s))
+	})
 	canceled := ctx.Err() != nil
 	cancel()
+	preview.clear()
 	if streamed {
 		fmt.Fprintln(a.out)
-	}
-	if result.Text != "" {
-		if !streamed {
-			a.renderReply(result.Text)
-		} else if a.markdown != nil && (strings.Contains(result.Text, "```") || strings.Contains(result.Text, "**") || strings.HasPrefix(result.Text, "#")) {
-			a.renderReply(result.Text)
-		}
+	} else if result.Text != "" {
+		a.renderReply(result.Text)
 	}
 	status := "complete"
 	if canceled || result.StopReason == "interrupted" {
