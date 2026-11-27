@@ -1,0 +1,147 @@
+name: Go build and release
+
+# Keep this workflow on the default branch to register workflow_dispatch, then run:
+# gh workflow run go-release.yml -R iamcheyan/bedrockchat --ref go-rewrite -f bump=patch
+# Only dispatches of the trusted go-rewrite branch publish. Tag pushes and
+# release events intentionally do not run this workflow. Keep release tags
+# immutable and permit this workflow's token to create them.
+'on':
+  push:
+    branches: [go-rewrite]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Increment the highest stable vX.Y.Z repository tag
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+        required: true
+
+permissions:
+  contents: read
+
+# Serialize the complete release sequence (read tags, build, publish). Push
+# builds each get their own group and never cancel another run.
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'bedrockchat-go-publish' || format('bedrockchat-go-build-{0}', github.run_id) }}
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'iamcheyan/bedrockchat' && github.ref == 'refs/heads/go-rewrite' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag_snapshot: ${{ steps.version.outputs.tag_snapshot }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+      - name: Select version from remote tags
+        id: version
+        shell: bash
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            echo 'version=dev' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git ls-remote --refs --tags https://github.com/iamcheyan/bedrockchat.git 'refs/tags/v*' | LC_ALL=C sort > "$RUNNER_TEMP/release-refs"
+          python3 - "$BUMP" "$RUNNER_TEMP/release-refs" <<'PY' >> "$GITHUB_OUTPUT"
+          import hashlib
+          import pathlib
+          import re
+          import sys
+
+          bump, filename = sys.argv[1:]
+          snapshot = pathlib.Path(filename).read_bytes()
+          exact = rb'refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+          base = (0, 0, 0)
+          for line in snapshot.splitlines():
+              if match := re.fullmatch(exact, line.split(b'\t', 1)[1]):
+                  base = max(base, tuple(map(int, match.groups())))
+          inc = ('major', 'minor', 'patch').index(bump)
+          version = (*base[:inc], base[inc] + 1, *(0,) * (2 - inc))
+          print('version=v' + '.'.join(map(str, version)))
+          print('tag_snapshot=' + hashlib.sha256(snapshot).hexdigest())
+          PY
+      - name: Test and build Linux binaries
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CGO_ENABLED: '0'
+          GOTOOLCHAIN: local
+        run: |
+          go test -mod=readonly ./...
+          mkdir dist
+          for arch in amd64 arm64; do
+            binary="dist/bedrockchat-linux-$arch"
+            GOOS=linux GOARCH="$arch" go build -mod=readonly -trimpath \
+              -ldflags="-s -w -X main.version=$VERSION" -o "$binary" ./cmd/bedrockchat
+            size=$(stat -c %s "$binary")
+            test "$size" -ge 4096 && test "$size" -le $((128 * 1024 * 1024)) || exit 1
+          done
+          test "$(dist/bedrockchat-linux-amd64 --version)" = "bedrockchat $VERSION"
+          (cd dist && sha256sum bedrockchat-linux-amd64 bedrockchat-linux-arm64 > SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: bedrockchat-linux-${{ github.sha }}
+          # Actions artifacts may strip execute bits; after downloading, chmod
+          # the binary to 0755 before running it (SHA256SUMS covers bytes only).
+          path: dist/
+          if-no-files-found: error
+          overwrite: true
+
+  release:
+    if: github.repository == 'iamcheyan/bedrockchat' && github.ref == 'refs/heads/go-rewrite' && github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # No source checkout or execution of built binaries in the write job.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: bedrockchat-linux-${{ github.sha }}
+          path: dist
+      - name: Verify release files
+        shell: bash
+        working-directory: dist
+        run: |
+          sha256sum bedrockchat-linux-amd64 bedrockchat-linux-arm64 | cmp - SHA256SUMS
+      - name: Reserve exact-SHA tag and publish as latest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG_SNAPSHOT: ${{ needs.build.outputs.tag_snapshot }}
+        run: |
+          repo=iamcheyan/bedrockchat
+          [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ "$(gh api "repos/$repo/git/ref/heads/go-rewrite" --jq '.object.sha')" == "$GITHUB_SHA" ]] || {
+            echo 'go-rewrite has advanced; dispatch a fresh release.' >&2
+            exit 1
+          }
+          snapshot=$(git ls-remote --refs --tags "https://github.com/$repo.git" 'refs/tags/v*' | LC_ALL=C sort | sha256sum)
+          [[ "${snapshot%% *}" == "$TAG_SNAPSHOT" ]] || {
+            echo 'Repository tags changed since the build; dispatch a fresh release.' >&2
+            exit 1
+          }
+          # Atomic create-only operation: never publish against someone else's tag.
+          created=$(gh api "repos/$repo/git/refs" --method POST \
+            -f ref="refs/tags/$VERSION" -f sha="$GITHUB_SHA" --jq '.object.sha')
+          test "$created" = "$GITHUB_SHA"
+          # If publication fails, inspect the reserved tag and any draft; do not
+          # overwrite either automatically. A fresh dispatch derives a new tag.
+          gh release create "$VERSION" --repo "$repo" --verify-tag --target "$GITHUB_SHA" --latest \
+            --title "$VERSION" --notes "Linux amd64 and arm64 builds from commit $GITHUB_SHA." \
+            dist/bedrockchat-linux-amd64 dist/bedrockchat-linux-arm64 dist/SHA256SUMS

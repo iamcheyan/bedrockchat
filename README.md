@@ -1,5 +1,7 @@
 # bedrockchat
 
+默认分支保留 Python 版。要使用无底栏的 Go 版或 `bedrockchat update`，请参阅 [`go-rewrite` 使用说明](https://github.com/iamcheyan/bedrockchat/tree/go-rewrite)及 [Linux 发布包](https://github.com/iamcheyan/bedrockchat/releases/latest)。
+
 简体中文 · [English](README.en.md) · [日本語](README.ja.md)
 
 **能发图、能接着聊，又不必把整段历史重发给模型的终端 AI 聊天工具。**
