@@ -124,6 +124,7 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	a := &app{cfg: cfg, history: h, prefs: p, lang: lang, backend: backend, out: out, editor: terminal.New(in, out)}
 	a.session = h.New(a.tr("未命名", "Untitled", "無題"), model)
 	if f, ok := out.(*os.File); ok && term.IsTerminal(int(f.Fd())) && os.Getenv("TERM") != "dumb" && os.Getenv("NO_COLOR") == "" {
+		a.color = true
 		width, _, _ := term.GetSize(int(f.Fd()))
 		if width < 30 {
 			width = 80
@@ -165,6 +166,7 @@ type app struct {
 	editor         *terminal.Editor
 	draft          []terminal.Part
 	markdown       *glamour.TermRenderer
+	color          bool
 }
 
 func (a *app) tr(zh, en, ja string) string {
@@ -184,7 +186,16 @@ func clean(s string) string {
 		return r
 	}, strings.ReplaceAll(s, "\r\n", "\n"))
 }
-func (a *app) line(s string) { fmt.Fprintln(a.out, clean(s)) }
+
+// line prints application text, not the user's message or the model's reply.
+func (a *app) line(s string) {
+	s = clean(s)
+	if a.color {
+		fmt.Fprintf(a.out, "\x1b[90m%s\x1b[39m\n", s)
+		return
+	}
+	fmt.Fprintln(a.out, s)
+}
 func (a *app) problem(e error) {
 	if e != nil {
 		a.line(a.tr("错误：", "Error: ", "エラー：") + e.Error())
@@ -197,7 +208,6 @@ func (a *app) showModel() {
 	}
 	a.line(a.tr("当前模型：", "Current model: ", "現在のモデル：") + model + " · " + a.cfg.Provider)
 }
-func (a *app) plainReply(s string) { a.line(s) }
 func (a *app) renderReply(s string) {
 	if a.markdown != nil {
 		if rendered, err := a.markdown.Render(clean(s)); err == nil {
@@ -205,7 +215,7 @@ func (a *app) renderReply(s string) {
 			return
 		}
 	}
-	a.plainReply(s)
+	fmt.Fprintln(a.out, clean(s))
 }
 func (a *app) textOnly() bool { v := a.cfg.ModelInfo(a.session.Model).Vision; return v != nil && !*v }
 func (a *app) imageBlocked() error {
@@ -564,7 +574,7 @@ func (a *app) command(msg string) bool {
 		start := max(len(a.session.Turns)-n, 0)
 		for i, t := range a.session.Turns[start:] {
 			a.line(fmt.Sprintf("#%d · %s · %s · %s", start+i+1, t.Timestamp, t.Model, t.Status))
-			a.line(t.User)
+			fmt.Fprintln(a.out, clean(t.User))
 			for j, img := range t.Attachments {
 				a.line(fmt.Sprintf("  #%d %s · %d×%d · %d B", j+1, img.Name, img.Width, img.Height, img.Size))
 			}

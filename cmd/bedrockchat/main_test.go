@@ -13,6 +13,37 @@ import (
 
 type testBackend struct{ requests []chat.Request }
 
+func TestResponseSeparatesMutedStatusFromBody(t *testing.T) {
+	for _, color := range []bool{true, false} {
+		var out bytes.Buffer
+		h := store.Store{}
+		a := app{cfg: store.Settings{Provider: "openai", MaxInput: 1024, MaxOutput: 64}, history: h, session: h.New("fixture", "test.model"), backend: &testBackend{}, out: &out, lang: "en", color: color}
+		a.showModel()
+		a.dispatch([]terminal.Part{{Text: "hello"}})
+		a.dispatch([]terminal.Part{{Text: "/show"}})
+		str := out.String()
+		for _, status := range []string{"Current model: test.model", "Estimated input:", "Request tokens:", "Session tokens:", "#1 ·"} {
+			prefix := ""
+			if color {
+				prefix = "\x1b[90m"
+			}
+			if !strings.Contains(str, prefix+status) {
+				t.Errorf("color=%t: missing status %q in %q", color, status, str)
+			}
+		}
+		body := "\noffline reply\n"
+		if strings.Count(str, body) != 2 || !strings.Contains(str, "\nhello\n") {
+			t.Errorf("color=%t: model or user body was styled: %q", color, str)
+		}
+		if color && !strings.Contains(str, "\x1b[39m\noffline reply\n\x1b[90mRequest tokens:") {
+			t.Errorf("terminal foreground not reset before reply: %q", str)
+		}
+		if !color && strings.ContainsRune(str, '\x1b') {
+			t.Errorf("unexpected escapes in plain output: %q", str)
+		}
+	}
+}
+
 func (b *testBackend) Send(_ context.Context, req chat.Request, delta func(string)) chat.Result {
 	b.requests = append(b.requests, req)
 	delta("offline reply")
