@@ -151,6 +151,74 @@ func TestBedrockMissingSSOSessionUsesSafeLoginHint(t *testing.T) {
 	}
 }
 
+func TestBedrockProfileSelectionMatchesPython(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config")
+	credsPath := filepath.Join(dir, "credentials")
+	if err := os.WriteFile(configPath, []byte("[profile legacy]\nregion = ap-northeast-1\n[profile chosen]\nregion = us-west-2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(credsPath, []byte("[legacy]\naws_access_key_id = fixture-legacy\naws_secret_access_key = fixture\n[chosen]\naws_access_key_id = fixture-chosen\naws_secret_access_key = fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWS_CONFIG_FILE", configPath)
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credsPath)
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	for _, key := range []string{"AWS_REGION", "AWS_DEFAULT_REGION", "AWS_ACCESS_KEY_ID", "AWS_ACCESS_KEY", "AWS_SECRET_ACCESS_KEY", "AWS_SECRET_KEY", "AWS_SESSION_TOKEN", "AWS_BEARER_TOKEN_BEDROCK", "AWS_WEB_IDENTITY_TOKEN_FILE"} {
+		t.Setenv(key, "")
+	}
+	for _, tc := range []struct {
+		name, profile, defaultProfile, explicit, envKey, wantRegion, wantKey string
+	}{
+		{"old shell name missing", "missing", "legacy", "", "", "ap-northeast-1", "fixture-legacy"},
+		{"both exist", "chosen", "legacy", "", "", "ap-northeast-1", "fixture-legacy"},
+		{"AWS_PROFILE alone", "chosen", "", "", "", "us-west-2", "fixture-chosen"},
+		{"environment keys still win", "missing", "legacy", "", "fixture-env", "ap-northeast-1", "fixture-env"},
+		{"explicit profile wins over environment", "missing", "legacy", "chosen", "fixture-env", "us-west-2", "fixture-chosen"},
+		{"missing explicit profile never falls back", "chosen", "legacy", "missing", "fixture-env", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AWS_PROFILE", tc.profile)
+			t.Setenv("AWS_DEFAULT_PROFILE", tc.defaultProfile)
+			if tc.envKey != "" {
+				t.Setenv("AWS_ACCESS_KEY_ID", tc.envKey)
+				t.Setenv("AWS_SECRET_ACCESS_KEY", "fixture")
+			}
+			client, err := makeBedrockClient(context.Background(), "", tc.explicit)
+			if tc.wantKey == "" {
+				if err == nil || !strings.Contains(bedrockError(err, false).Error(), "AWS profile not found") {
+					t.Fatal("a missing explicit profile must fail, not silently change accounts")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(bedrockError(err, false))
+			}
+			opts := client.Options()
+			creds, err := opts.Credentials.Retrieve(context.Background())
+			if err != nil || creds.AccessKeyID != tc.wantKey || opts.Region != tc.wantRegion {
+				t.Fatalf("wrong region or credential source (region=%s, source=%s, error=%v)", opts.Region, creds.Source, err)
+			}
+			if os.Getenv("AWS_PROFILE") != tc.profile || os.Getenv("AWS_DEFAULT_PROFILE") != tc.defaultProfile {
+				t.Fatal("profile resolution modified the process environment")
+			}
+		})
+	}
+	t.Run("environment web identity is not replaced by profile credentials", func(t *testing.T) {
+		t.Setenv("AWS_PROFILE", "chosen")
+		t.Setenv("AWS_DEFAULT_PROFILE", "legacy")
+		t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", filepath.Join(dir, "nonexistent-token"))
+		t.Setenv("AWS_ROLE_ARN", "arn:aws:iam::123456789012:role/fixture")
+		client, err := makeBedrockClient(context.Background(), "", "")
+		if err != nil {
+			t.Fatal(bedrockError(err, false))
+		}
+		if _, err := client.Options().Credentials.Retrieve(context.Background()); !errors.Is(err, errAWSNoCredentials) {
+			t.Fatal("expected the missing web identity token to fail without falling back to static credentials")
+		}
+	})
+}
+
 func TestBedrockSDKConfiguration(t *testing.T) {
 	dir := t.TempDir()
 	configFile := filepath.Join(dir, "config")

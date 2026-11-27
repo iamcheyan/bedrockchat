@@ -34,6 +34,8 @@ aws sso login --profile work-sso
 bedrockchat --profile work-sso --region us-east-1 --model amazon.nova-lite-v1:0
 ```
 
+如果提示 `AWS profile not found`，可用 `aws configure list-profiles` 核对名称，并用 `--profile <名称>` 明确选择。未明确设置时，若 `AWS_DEFAULT_PROFILE` 和 `AWS_PROFILE` 同时存在，普通 profile 选择沿用 Python 版的优先级，先取 `AWS_DEFAULT_PROFILE`。显式指定的 profile 不存在时会报错，不会回退到其他 profile。
+
 若使用本机 Ollama，在服务已启动并下载模型后运行：
 
 ```bash

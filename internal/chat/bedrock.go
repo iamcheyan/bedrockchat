@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -43,13 +44,35 @@ func makeBedrockClient(ctx context.Context, region, profile string) (*bedrockrun
 		tr.TLSHandshakeTimeout = connectTimeout
 		tr.ResponseHeaderTimeout = ioTimeout
 	})
-	cfg, err := config.LoadDefaultConfig(ctx,
+	options := []func(*config.LoadOptions) error{
 		config.WithRegion(region), config.WithSharedConfigProfile(profile),
 		config.WithDefaultsMode(aws.DefaultsModeStandard),
 		config.WithRetryer(func() aws.Retryer { return aws.NopRetryer{} }),
 		config.WithLogger(logging.Nop{}), config.WithClientLogMode(0),
 		config.WithLogConfigurationWarnings(false), config.WithHTTPClient(transport),
-	)
+	}
+	// Botocore prefers AWS_DEFAULT_PROFILE when both environment variables
+	// are set; the Go SDK prefers AWS_PROFILE. Align the implicit selection
+	// without changing the process environment or a caller's explicit profile.
+	if legacy, selected := os.Getenv("AWS_DEFAULT_PROFILE"), os.Getenv("AWS_PROFILE"); profile == "" && legacy != "" && selected != "" && selected != legacy {
+		env, err := config.NewEnvConfig()
+		if err != nil {
+			return nil, err
+		}
+		// The SDK treats the override as an explicit profile. Preserve static
+		// environment credentials, and leave the SDK's environment-driven web
+		// identity chain alone rather than replacing it with profile credentials.
+		if env.Credentials.HasKeys() || env.WebIdentityTokenFilePath == "" {
+			options = append(options, config.WithSharedConfigProfile(legacy))
+			if env.Credentials.HasKeys() {
+				creds := env.Credentials
+				options = append(options, config.WithCredentialsProvider(aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+					return creds, nil
+				})))
+			}
+		}
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +273,7 @@ func bedrockError(err error, vision bool) error {
 	}
 	var profile config.SharedConfigProfileNotExistError
 	if errors.As(err, &profile) {
-		return errors.New("AWS profile not found; check the selected profile name")
+		return errors.New("AWS profile not found; check AWS_DEFAULT_PROFILE and AWS_PROFILE or specify --profile <name>")
 	}
 	var api smithy.APIError
 	var params smithy.InvalidParamsError
