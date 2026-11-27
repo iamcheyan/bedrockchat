@@ -6,84 +6,87 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
-	"github.com/rivo/uniseg"
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/glamour/styles"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const (
-	clearPreview     = "\r\x1b[2K"
-	previewInterval  = 80 * time.Millisecond
-	previewTailLimit = 4096
+	clearPreview    = "\r\x1b[2K"
+	previewInterval = 80 * time.Millisecond
 )
 
-// replyPreview displays recent stream text on one replaceable row. The full
-// reply is rendered separately, after the backend finishes, so a partial fence,
-// table, or reference link never has to be interpreted as a complete document.
+func newReplyRenderer(width int) (*glamour.TermRenderer, error) {
+	style := styles.DarkStyleConfig
+	for _, prefix := range []*string{&style.H2.Prefix, &style.H3.Prefix, &style.H4.Prefix, &style.H5.Prefix, &style.H6.Prefix} {
+		*prefix = ""
+	}
+	return glamour.NewTermRenderer(glamour.WithStyles(style), glamour.WithWordWrap(max(1, min(width-1, 100))))
+}
+
+// Reparse the accumulated Markdown so newly completed tables and fences can
+// change how earlier text looks. Only a screenful is repainted; the final
+// render writes the whole reply to normal terminal scrollback.
 type replyPreview struct {
-	out     io.Writer
-	width   func() int
-	tail    string
-	last    time.Time
-	visible bool
+	out    io.Writer
+	size   func() (int, int)
+	render func(string) string
+	text   strings.Builder
+	last   time.Time
+	rows   int
+	color  bool
 }
 
 func (p *replyPreview) feed(chunk string) {
-	// Limit both retained state and the cost of a large individual chunk.
-	if len(chunk) >= previewTailLimit {
-		p.tail = chunk[len(chunk)-previewTailLimit:]
-	} else {
-		p.tail += chunk
-		if len(p.tail) > previewTailLimit {
-			p.tail = p.tail[len(p.tail)-previewTailLimit:]
-		}
+	if chunk == "" {
+		return
 	}
+	p.text.WriteString(chunk)
 	now := time.Now()
 	if now.Sub(p.last) < previewInterval {
 		return
 	}
-	width := 80
-	if p.width != nil {
-		width = p.width()
+	width, height := 80, 24
+	if p.size != nil {
+		width, height = p.size()
 	}
-	text := previewLine(p.tail, width)
-	if text == "" {
+	rows := previewRows(p.render(p.text.String()), width, height)
+	p.clear()
+	if len(rows) == 0 {
 		return
 	}
-	fmt.Fprintf(p.out, "%s\x1b[90m%s\x1b[39m", clearPreview, text)
-	p.visible = true
-	p.last = now
+	reset := ""
+	if p.color {
+		reset = "\x1b[0m"
+	}
+	fmt.Fprint(p.out, strings.Join(rows, "\r\n"), reset)
+	p.rows, p.last = len(rows), now
 }
 
 func (p *replyPreview) clear() {
-	if p.visible {
-		fmt.Fprint(p.out, clearPreview)
-	}
-}
-
-func previewLine(tail string, width int) string {
-	// Leave one spare column to avoid triggering automatic line wrap.
-	limit := width - 1
-	if limit < 2 {
-		return ""
-	}
-	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
-		tail = tail[1:]
-	}
-	text := strings.Join(strings.Fields(clean(tail)), " ")
-	if uniseg.StringWidth(text) <= limit {
-		return text
-	}
-	clusters := uniseg.NewGraphemes(text)
-	remaining := uniseg.StringWidth(text)
-	for clusters.Next() {
-		remaining -= clusters.Width()
-		if remaining <= limit-1 {
-			_, end := clusters.Positions()
-			return "…" + text[end:]
+	var frame strings.Builder
+	for row := p.rows; row > 0; row-- {
+		frame.WriteString(clearPreview)
+		if row > 1 {
+			frame.WriteString("\x1b[1A")
 		}
 	}
-	return "…"
+	if p.rows > 0 {
+		io.WriteString(p.out, frame.String())
+	}
+	p.rows = 0
+}
+
+func previewRows(text string, width, height int) []string {
+	// Leave a spare row and column so the cursor never wraps implicitly.
+	if width < 3 || height < 2 || strings.TrimSpace(ansi.Strip(text)) == "" {
+		return nil
+	}
+	text = strings.Trim(text, "\n")
+	text = strings.ReplaceAll(text, "\t", "    ")
+	rows := strings.Split(ansi.Hardwrap(text, width-1, true), "\n")
+	return rows[max(0, len(rows)-height+1):]
 }
 
 var sgr = regexp.MustCompile(`\x1b\[[0-9;]*m`)

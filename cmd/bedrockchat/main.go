@@ -136,17 +136,17 @@ func run(args []string, in *os.File, out, stderr io.Writer) int {
 	}
 	a := &app{cfg: cfg, history: h, prefs: p, lang: lang, backend: backend, out: out, editor: terminal.New(in, out)}
 	a.session = h.New(a.tr("未命名", "Untitled", "無題"), model)
-	if f, ok := out.(*os.File); ok && term.IsTerminal(int(f.Fd())) && os.Getenv("TERM") != "dumb" && os.Getenv("NO_COLOR") == "" {
-		a.color = true
-		a.replyWidth = func() int {
-			width, _, _ := term.GetSize(int(f.Fd()))
-			return width
+	if f, ok := out.(*os.File); ok && term.IsTerminal(int(f.Fd())) && os.Getenv("TERM") != "dumb" {
+		a.color = os.Getenv("NO_COLOR") == ""
+		a.replySize = func() (int, int) {
+			width, height, _ := term.GetSize(int(f.Fd()))
+			if width <= 0 || height <= 0 {
+				return 80, 24
+			}
+			return width, height
 		}
-		width := a.replyWidth()
-		if width <= 0 {
-			width = 80
-		}
-		a.markdown, _ = glamour.NewTermRenderer(glamour.WithStylePath("dark"), glamour.WithWordWrap(min(width, 100)))
+		width, _ := a.replySize()
+		a.markdown, _ = newReplyRenderer(width)
 	}
 	a.editor.ImageLabel = func(_ chat.Image) string { return a.tr("[图片]", "[Image]", "[画像]") }
 	a.editor.PasteLabel = func(number, lines int) string {
@@ -184,7 +184,7 @@ type app struct {
 	editor         *terminal.Editor
 	draft          []terminal.Part
 	markdown       *glamour.TermRenderer
-	replyWidth     func() int
+	replySize      func() (int, int)
 	color          bool
 }
 
@@ -235,16 +235,22 @@ func (a *app) showThinking() {
 	a.line(a.tr("推理模式：", "Thinking mode: ", "推論モード：") + string(mode))
 }
 
-func (a *app) renderReply(s string) {
+func (a *app) formatReply(s string) string {
+	s = clean(s)
 	if a.markdown != nil {
-		if rendered, err := a.markdown.Render(clean(s)); err == nil {
-			fmt.Fprint(a.out, safeMarkdownOutput(rendered))
-			return
+		if rendered, err := a.markdown.Render(s); err == nil {
+			rendered = safeMarkdownOutput(rendered)
+			if !a.color {
+				rendered = sgr.ReplaceAllString(rendered, "")
+			}
+			return rendered
 		}
 	}
-	fmt.Fprintln(a.out, clean(s))
+	return s + "\n"
 }
-func (a *app) textOnly() bool { v := a.cfg.ModelInfo(a.session.Model).Vision; return v != nil && !*v }
+
+func (a *app) renderReply(s string) { fmt.Fprint(a.out, a.formatReply(s)) }
+func (a *app) textOnly() bool       { v := a.cfg.ModelInfo(a.session.Model).Vision; return v != nil && !*v }
 func (a *app) imageBlocked() error {
 	return errors.New(a.tr("当前模型不支持图片。", "The current model does not support images.", "現在のモデルは画像に対応していません。"))
 }
@@ -320,7 +326,7 @@ func (a *app) dispatch(parts []terminal.Part) bool {
 	a.line(fmt.Sprintf(a.tr("预计输入 %d Token · 略去 %d 轮 · Ctrl+C 中断", "Estimated input: %d tokens · %d turns omitted · Ctrl+C to cancel", "入力推定 %d トークン · %d ターン省略 · Ctrl+C で中断"), estimated, dropped))
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	var streamed bool
-	preview := replyPreview{out: a.out, width: a.replyWidth}
+	preview := replyPreview{out: a.out, size: a.replySize, render: a.formatReply, color: a.color}
 	result := a.backend.Send(ctx, req, func(s string) {
 		if a.markdown != nil {
 			preview.feed(s)

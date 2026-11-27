@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/iamcheyan/bedrockchat/internal/chat"
 	"github.com/iamcheyan/bedrockchat/internal/store"
 	"github.com/iamcheyan/bedrockchat/internal/terminal"
@@ -19,29 +18,29 @@ func (b replyBackend) Send(ctx context.Context, req chat.Request, emit func(stri
 	return b(ctx, req, emit)
 }
 
-func TestStreamUsesTransientPreviewAndRendersWholeReply(t *testing.T) {
-	renderer, err := glamour.NewTermRenderer(glamour.WithStylePath("dark"))
+func TestStreamRendersMarkdownBeforeReplyFinishes(t *testing.T) {
+	renderer, err := newReplyRenderer(80)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
 	h := store.Store{}
-	const text = "A short introduction.\n\n| Key | Value |\n| --- | --- |\n| One | `item` |\n\n- *emphasis*\n\n```go\nfmt.Println(42)\n```"
+	const text = "## A short introduction.\n\n| Key | Value |\n| --- | --- |\n| One | `item` |\n\n- *emphasis*\n\n```go\nfmt.Println(42)\n```"
 	a := app{cfg: store.Settings{Provider: "openai", MaxInput: 1024, MaxOutput: 64}, history: h,
 		session: h.New("fixture", "test.model"), out: &out, lang: "en", color: true, markdown: renderer}
 	a.backend = replyBackend(func(_ context.Context, _ chat.Request, emit func(string)) chat.Result {
-		emit("A short introduction.")
-		if !strings.Contains(out.String(), "\r\x1b[2K") {
-			t.Error("stream is not using a transient preview")
+		emit(text)
+		live := out.String()
+		if !strings.Contains(live, "│") || !strings.Contains(live, "\n") || strings.Contains(live, "| --- | --- |") || strings.Contains(live, "```go") || strings.Contains(live, "## A short introduction.") {
+			t.Errorf("reply was not formatted as Markdown while streaming: %q", live)
 		}
-		emit(strings.TrimPrefix(text, "A short introduction."))
 		return chat.Result{Text: text, StopReason: "end_turn"}
 	})
 	a.dispatch([]terminal.Part{{Text: "hello"}})
 	output := out.String()
 	lastClear := strings.LastIndex(output, clearPreview)
-	if lastClear == -1 || strings.Contains(output[:lastClear], "\nemphasis") {
-		t.Fatal("expected only an erasable preview before the final reply")
+	if lastClear == -1 {
+		t.Fatal("expected preview to be erased before the final reply")
 	}
 	final := output[lastClear+len(clearPreview):]
 	if strings.Contains(final, "```go") || strings.Contains(final, "| --- | --- |") || !strings.Contains(final, "│") {
@@ -52,13 +51,14 @@ func TestStreamUsesTransientPreviewAndRendersWholeReply(t *testing.T) {
 	}
 }
 
-func TestPreviewFitsOneRowAndDoesNotSplitGraphemes(t *testing.T) {
-	got := previewLine("\x1b[2Jlong line\n中文👩‍💻", 8)
-	if got != "…中文👩‍💻" || uniseg.StringWidth(got) != 7 {
-		t.Fatalf("preview does not fit: %q", got)
+func TestPreviewRowsWrapAndKeepLatestScreenful(t *testing.T) {
+	rows := previewRows("discard this line\n中文👩‍💻\nlast", 8, 3)
+	if got := strings.Join(rows, "\n"); got != "中文👩‍💻\nlast" {
+		t.Fatalf("wrong visible rows: %q", got)
 	}
-	if got := previewLine("hello", 2); got != "" {
-		t.Fatalf("unexpected preview in a two-column terminal: %q", got)
+	rows = previewRows("中文👩‍💻next", 7, 4)
+	if len(rows) != 2 || rows[0] != "中文👩‍💻" || rows[1] != "next" || uniseg.StringWidth(rows[0]) != 6 {
+		t.Fatalf("did not wrap on a grapheme boundary: %q", rows)
 	}
 }
 
